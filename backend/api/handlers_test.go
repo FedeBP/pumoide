@@ -198,3 +198,60 @@ func TestDeleteRequestFromCollection(t *testing.T) {
 		t.Errorf("request was not removed from collection")
 	}
 }
+
+func TestUpdateCollection(t *testing.T) {
+	// Setup: Create a temporary directory and a test collection
+	tempDir, _ := os.MkdirTemp("", "api_test")
+	defer func(path string) {
+		err := os.RemoveAll(path)
+		if err != nil {
+			t.Fatalf("Failed to create temp dir: %v", err)
+		}
+	}(tempDir)
+	collection := models.Collection{
+		ID:   "test1",
+		Name: "Test Collection",
+		Requests: []models.Request{
+			{ID: "req1", Method: "GET", URL: "http://example.com/api"},
+		},
+	}
+	err := collection.Save(tempDir)
+	if err != nil {
+		t.Fatalf("Failed to save collection: %v", err)
+	}
+
+	// Create updated collection data
+	updatedCollection := models.Collection{
+		Name: "Updated Test Collection",
+		Requests: []models.Request{
+			{ID: "req1", Method: "POST", URL: "http://example.com/api/updated"},
+			{ID: "req2", Method: "GET", URL: "http://example.com/api/new"},
+		},
+	}
+	body, _ := json.Marshal(updatedCollection)
+
+	// Create request
+	req, _ := http.NewRequest("PUT", "/pumoide-api/collections?action=update&id=test1&path="+tempDir, bytes.NewBuffer(body))
+	rr := httptest.NewRecorder()
+
+	// Call the handler
+	handler := http.HandlerFunc(handleCollections)
+	handler.ServeHTTP(rr, req)
+
+	// Check the status code
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+
+	// Check if the collection was updated
+	loadedCollection, err := models.LoadCollection(tempDir, "test1")
+	if err != nil {
+		t.Fatalf("Failed to load updated collection: %v", err)
+	}
+	if loadedCollection.Name != "Updated Test Collection" {
+		t.Errorf("collection name was not updated: got %v want %v", loadedCollection.Name, "Updated Test Collection")
+	}
+	if len(loadedCollection.Requests) != 2 {
+		t.Errorf("incorrect number of requests: got %v want %v", len(loadedCollection.Requests), 2)
+	}
+}

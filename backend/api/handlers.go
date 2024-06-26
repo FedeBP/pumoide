@@ -17,14 +17,16 @@ func handleCollections(w http.ResponseWriter, r *http.Request) {
 		createCollection(w, r)
 	case http.MethodPut:
 		action := r.URL.Query().Get("action")
-		if action == "addRequest" {
+		switch action {
+		case "addRequest":
 			addRequestToCollection(w, r)
-		} else {
+		case "update":
+			updateCollection(w, r)
+		default:
 			http.Error(w, "Invalid action", http.StatusBadRequest)
 		}
 	case http.MethodDelete:
-		action := r.URL.Query().Get("action")
-		if action == "deleteRequest" {
+		if r.URL.Query().Get("action") == "deleteRequest" {
 			deleteRequestFromCollection(w, r)
 		} else {
 			http.Error(w, "Invalid action", http.StatusBadRequest)
@@ -170,6 +172,48 @@ func deleteRequestFromCollection(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_, err = w.Write([]byte("Request deleted successfully"))
+	if err != nil {
+		http.Error(w, "Failed to write header", http.StatusInternalServerError)
+		return
+	}
+}
+
+func updateCollection(w http.ResponseWriter, r *http.Request) {
+	collectionID := r.URL.Query().Get("id")
+	if collectionID == "" {
+		http.Error(w, "Collection ID is required", http.StatusBadRequest)
+		return
+	}
+
+	var updatedCollection models.Collection
+	err := json.NewDecoder(r.Body).Decode(&updatedCollection)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	collectionPath := r.URL.Query().Get("path")
+	if collectionPath == "" {
+		collectionPath = utils.GetDefaultCollectionsPath()
+	}
+
+	existingCollection, err := models.LoadCollection(collectionPath, collectionID)
+	if err != nil {
+		http.Error(w, "Failed to load collection", http.StatusNotFound)
+		return
+	}
+
+	existingCollection.Name = updatedCollection.Name
+	existingCollection.Requests = updatedCollection.Requests
+
+	err = existingCollection.Save(collectionPath)
+	if err != nil {
+		http.Error(w, "Failed to save updated collection", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	err = json.NewEncoder(w).Encode(existingCollection)
 	if err != nil {
 		http.Error(w, "Failed to write header", http.StatusInternalServerError)
 		return
