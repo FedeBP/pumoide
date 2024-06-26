@@ -1,6 +1,6 @@
 # Pumoide
 
-Pumoide is an open-source, performant, and minimalistic API client application similar to Postman or Insomnia. It's built with Tauri, using Go for the backend and Svelte for the frontend.
+Pumoide is an open-source, performant, and minimalistic API client application. It's built with Tauri, using Go for the backend and Svelte for the frontend.
 
 ## Features
 
