@@ -7,6 +7,7 @@ import (
 	"github.com/FedeBP/pumoide/backend/utils"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/FedeBP/pumoide/backend/models"
@@ -94,7 +95,7 @@ func TestRequestHandler_Handle(t *testing.T) {
 
 func TestRequestHandler_InvalidMethod(t *testing.T) {
 	testRequest := models.Request{
-		Method: "INVALID",
+		Method: models.Method("INVALID"),
 		URL:    "http://example.com",
 	}
 
@@ -107,5 +108,10 @@ func TestRequestHandler_InvalidMethod(t *testing.T) {
 
 	if status := rr.Code; status != http.StatusBadRequest {
 		t.Errorf("Handler returned wrong status code for invalid method: got %v want %v", status, http.StatusBadRequest)
+	}
+
+	expectedErrorMessage := "invalid HTTP method: INVALID"
+	if !strings.Contains(rr.Body.String(), expectedErrorMessage) {
+		t.Errorf("Handler returned unexpected error message: got %v want %v", rr.Body.String(), expectedErrorMessage)
 	}
 }
