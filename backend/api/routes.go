@@ -1,7 +1,12 @@
 package api
 
-import "net/http"
+import (
+	"github.com/FedeBP/pumoide/backend/utils"
+	"net/http"
+)
 
 func InitRoutes() {
-	http.HandleFunc("/pumoide-api/collections", handleCollections)
+	defaultPath := utils.GetDefaultCollectionsPath()
+	collectionHandler := NewCollectionHandler(defaultPath)
+	http.HandleFunc("/pumoide-api/collections", collectionHandler.Handle)
 }

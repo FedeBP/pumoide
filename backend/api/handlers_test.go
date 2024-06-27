@@ -8,55 +8,57 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestCreateCollection(t *testing.T) {
-	// Create a temporary directory for testing
+func setupTestEnvironment(t *testing.T) (string, *CollectionHandler, func()) {
 	tempDir, err := os.MkdirTemp("", "api_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
-	defer func(path string) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			t.Fatalf("Failed to delete temp dir: %v", err)
-		}
-	}(tempDir)
 
-	// Create test data
+	handler := NewCollectionHandler(tempDir)
+
+	cleanup := func() {
+		if err := os.RemoveAll(tempDir); err != nil {
+			t.Errorf("Failed to clean up temp dir: %v", err)
+		}
+	}
+
+	return tempDir, handler, cleanup
+}
+
+func TestCreateCollection(t *testing.T) {
+	_, handler, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
 	collection := models.Collection{
 		Name: "Test Collection",
 		Requests: []models.Request{
 			{Method: "GET", URL: "http://example.com"},
 		},
 	}
-	body, _ := json.Marshal(collection)
-
-	// Create request
-	req, err := http.NewRequest("POST", "/pumoide-api/collections?path="+tempDir, bytes.NewBuffer(body))
+	body, err := json.Marshal(collection)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to marshal collection: %v", err)
 	}
 
-	// Create response recorder
+	req, err := http.NewRequest("POST", "/pumoide-api/collections", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	rr := httptest.NewRecorder()
 
-	// Call the handler
-	handler := http.HandlerFunc(handleCollections)
-	handler.ServeHTTP(rr, req)
+	handler.Handle(rr, req)
 
-	// Check the status code
 	if status := rr.Code; status != http.StatusCreated {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
 	}
 
-	// Check the response body
 	var responseCollection models.Collection
 	err = json.Unmarshal(rr.Body.Bytes(), &responseCollection)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 	if responseCollection.Name != collection.Name {
 		t.Errorf("handler returned unexpected body: got %v want %v", responseCollection.Name, collection.Name)
@@ -64,17 +66,8 @@ func TestCreateCollection(t *testing.T) {
 }
 
 func TestGetCollections(t *testing.T) {
-	// Create a temporary directory for testing
-	tempDir, err := os.MkdirTemp("", "api_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer func(path string) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			t.Fatalf("Failed to delete temp dir: %v", err)
-		}
-	}(tempDir)
+	tempDir, handler, cleanup := setupTestEnvironment(t)
+	defer cleanup()
 
 	// Create some test collections
 	collections := []models.Collection{
@@ -82,35 +75,27 @@ func TestGetCollections(t *testing.T) {
 		{ID: "test2", Name: "Test Collection 2"},
 	}
 	for _, c := range collections {
-		err := c.Save(tempDir)
-		if err != nil {
-			t.Fatalf("Failed to save temp dir: %v", err)
+		if err := c.Save(tempDir); err != nil {
+			t.Fatalf("Failed to save collection: %v", err)
 		}
 	}
 
-	// Create request
-	req, err := http.NewRequest("GET", "/pumoide-api/collections?path="+tempDir, nil)
+	req, err := http.NewRequest("GET", "/pumoide-api/collections", nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to create request: %v", err)
 	}
-
-	// Create response recorder
 	rr := httptest.NewRecorder()
 
-	// Call the handler
-	handler := http.HandlerFunc(handleCollections)
-	handler.ServeHTTP(rr, req)
+	handler.Handle(rr, req)
 
-	// Check the status code
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	// Check the response body
 	var responseCollections []models.Collection
 	err = json.Unmarshal(rr.Body.Bytes(), &responseCollections)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 	if len(responseCollections) != len(collections) {
 		t.Errorf("handler returned unexpected number of collections: got %v want %v", len(responseCollections), len(collections))
@@ -118,41 +103,35 @@ func TestGetCollections(t *testing.T) {
 }
 
 func TestAddRequestToCollection(t *testing.T) {
-	// Setup: Create a temporary directory and a test collection
-	tempDir, _ := os.MkdirTemp("", "api_test")
-	defer func(path string) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			t.Fatalf("Failed to create temp dir %v", err)
-		}
-	}(tempDir)
+	tempDir, handler, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
 	collection := models.Collection{ID: "test1", Name: "Test Collection"}
-	err := collection.Save(tempDir)
-	if err != nil {
+	if err := collection.Save(tempDir); err != nil {
 		t.Fatalf("Failed to save collection: %v", err)
 	}
 
-	// Create test request data
 	request := models.Request{Method: "GET", URL: "http://example.com/api"}
-	body, _ := json.Marshal(request)
+	body, err := json.Marshal(request)
+	if err != nil {
+		t.Fatalf("Failed to marshal request: %v", err)
+	}
 
-	// Create request
-	req, _ := http.NewRequest("PUT", "/pumoide-api/collections?action=addRequest&id=test1&path="+tempDir, bytes.NewBuffer(body))
+	req, err := http.NewRequest("PUT", "/pumoide-api/collections?action=addRequest&id=test1", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	rr := httptest.NewRecorder()
 
-	// Call the handler
-	handler := http.HandlerFunc(handleCollections)
-	handler.ServeHTTP(rr, req)
+	handler.Handle(rr, req)
 
-	// Check the status code
 	if status := rr.Code; status != http.StatusCreated {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
 	}
 
-	// Check if the request was added to the collection
 	updatedCollection, err := models.LoadCollection(tempDir, "test1")
 	if err != nil {
-		t.Fatalf("Failed to load collection: %v", err)
+		t.Fatalf("Failed to load updated collection: %v", err)
 	}
 	if len(updatedCollection.Requests) != 1 {
 		t.Errorf("request was not added to collection")
@@ -160,41 +139,33 @@ func TestAddRequestToCollection(t *testing.T) {
 }
 
 func TestDeleteRequestFromCollection(t *testing.T) {
-	// Setup: Create a temporary directory and a test collection with a request
-	tempDir, _ := os.MkdirTemp("", "api_test")
-	defer func(path string) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			t.Fatalf("Failed to create temp dir: %v", err)
-		}
-	}(tempDir)
+	tempDir, handler, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
 	collection := models.Collection{
 		ID:       "test1",
 		Name:     "Test Collection",
 		Requests: []models.Request{{ID: "req1", Method: "GET", URL: "http://example.com/api"}},
 	}
-	err := collection.Save(tempDir)
-	if err != nil {
+	if err := collection.Save(tempDir); err != nil {
 		t.Fatalf("Failed to save collection: %v", err)
 	}
 
-	// Create request
-	req, _ := http.NewRequest("DELETE", "/pumoide-api/collections?action=deleteRequest&collectionId=test1&requestId=req1&path="+tempDir, nil)
+	req, err := http.NewRequest("DELETE", "/pumoide-api/collections?action=deleteRequest&collectionId=test1&requestId=req1", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	rr := httptest.NewRecorder()
 
-	// Call the handler
-	handler := http.HandlerFunc(handleCollections)
-	handler.ServeHTTP(rr, req)
+	handler.Handle(rr, req)
 
-	// Check the status code
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	// Check if the request was removed from the collection
 	updatedCollection, err := models.LoadCollection(tempDir, "test1")
 	if err != nil {
-		t.Fatalf("Failed to load collection: %v", err)
+		t.Fatalf("Failed to load updated collection: %v", err)
 	}
 	if len(updatedCollection.Requests) != 0 {
 		t.Errorf("request was not removed from collection")
@@ -202,14 +173,9 @@ func TestDeleteRequestFromCollection(t *testing.T) {
 }
 
 func TestUpdateCollection(t *testing.T) {
-	// Setup: Create a temporary directory and a test collection
-	tempDir, _ := os.MkdirTemp("", "api_test")
-	defer func(path string) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			t.Fatalf("Failed to create temp dir: %v", err)
-		}
-	}(tempDir)
+	tempDir, handler, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
 	collection := models.Collection{
 		ID:   "test1",
 		Name: "Test Collection",
@@ -217,12 +183,10 @@ func TestUpdateCollection(t *testing.T) {
 			{ID: "req1", Method: "GET", URL: "http://example.com/api"},
 		},
 	}
-	err := collection.Save(tempDir)
-	if err != nil {
+	if err := collection.Save(tempDir); err != nil {
 		t.Fatalf("Failed to save collection: %v", err)
 	}
 
-	// Create updated collection data
 	updatedCollection := models.Collection{
 		Name: "Updated Test Collection",
 		Requests: []models.Request{
@@ -230,22 +194,23 @@ func TestUpdateCollection(t *testing.T) {
 			{ID: "req2", Method: "GET", URL: "http://example.com/api/new"},
 		},
 	}
-	body, _ := json.Marshal(updatedCollection)
+	body, err := json.Marshal(updatedCollection)
+	if err != nil {
+		t.Fatalf("Failed to marshal updated collection: %v", err)
+	}
 
-	// Create request
-	req, _ := http.NewRequest("PUT", "/pumoide-api/collections?action=updateCollection&id=test1&path="+tempDir, bytes.NewBuffer(body))
+	req, err := http.NewRequest("PUT", "/pumoide-api/collections?action=updateCollection&id=test1", bytes.NewBuffer(body))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	rr := httptest.NewRecorder()
 
-	// Call the handler
-	handler := http.HandlerFunc(handleCollections)
-	handler.ServeHTTP(rr, req)
+	handler.Handle(rr, req)
 
-	// Check the status code
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	// Check if the collection was updated
 	loadedCollection, err := models.LoadCollection(tempDir, "test1")
 	if err != nil {
 		t.Fatalf("Failed to load updated collection: %v", err)
@@ -259,14 +224,9 @@ func TestUpdateCollection(t *testing.T) {
 }
 
 func TestDeleteCollection(t *testing.T) {
-	// Setup: Create a temporary directory and a test collection
-	tempDir, _ := os.MkdirTemp("", "api_test")
-	defer func(path string) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			t.Fatalf("Failed to create temp dir: %v", err)
-		}
-	}(tempDir)
+	tempDir, handler, cleanup := setupTestEnvironment(t)
+	defer cleanup()
+
 	collection := models.Collection{
 		ID:   "test1",
 		Name: "Test Collection",
@@ -274,25 +234,22 @@ func TestDeleteCollection(t *testing.T) {
 			{ID: "req1", Method: "GET", URL: "http://example.com/api"},
 		},
 	}
-	err := collection.Save(tempDir)
-	if err != nil {
+	if err := collection.Save(tempDir); err != nil {
 		t.Fatalf("Failed to save collection: %v", err)
 	}
 
-	// Create request
-	req, _ := http.NewRequest("DELETE", "/pumoide-api/collections?action=deleteCollection&id=test1&path="+tempDir, nil)
+	req, err := http.NewRequest("DELETE", "/pumoide-api/collections?action=deleteCollection&id=test1", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	rr := httptest.NewRecorder()
 
-	// Call the handler
-	handler := http.HandlerFunc(handleCollections)
-	handler.ServeHTTP(rr, req)
+	handler.Handle(rr, req)
 
-	// Check the status code
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	// Check if the collection file was deleted
 	_, err = os.Stat(filepath.Join(tempDir, "test1.json"))
 	if !os.IsNotExist(err) {
 		t.Errorf("collection file was not deleted")
@@ -300,13 +257,8 @@ func TestDeleteCollection(t *testing.T) {
 }
 
 func TestImportCollection(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "api_test")
-	defer func(path string) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			t.Fatalf("Failed to create temp dir: %v", err)
-		}
-	}(tempDir)
+	_, handler, cleanup := setupTestEnvironment(t)
+	defer cleanup()
 
 	importJSON := `{
         "info": {
@@ -334,21 +286,22 @@ func TestImportCollection(t *testing.T) {
         ]
     }`
 
-	req, _ := http.NewRequest("POST", "/pumoide-api/collections?action=import&path="+tempDir, strings.NewReader(importJSON))
+	req, err := http.NewRequest("POST", "/pumoide-api/collections?action=import", bytes.NewBufferString(importJSON))
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	rr := httptest.NewRecorder()
 
-	handler := http.HandlerFunc(handleCollections)
-	handler.ServeHTTP(rr, req)
+	handler.Handle(rr, req)
 
 	if status := rr.Code; status != http.StatusCreated {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
 	}
 
 	var responseCollection models.Collection
-	err := json.Unmarshal(rr.Body.Bytes(), &responseCollection)
+	err = json.Unmarshal(rr.Body.Bytes(), &responseCollection)
 	if err != nil {
-		t.Errorf("failet to unmarshall %v", err)
-		return
+		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
 	if responseCollection.Name != "Imported Collection" {
@@ -361,13 +314,8 @@ func TestImportCollection(t *testing.T) {
 }
 
 func TestExportCollection(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "api_test")
-	defer func(path string) {
-		err := os.RemoveAll(path)
-		if err != nil {
-			t.Fatalf("Failed to create temp dir: %v", err)
-		}
-	}(tempDir)
+	tempDir, handler, cleanup := setupTestEnvironment(t)
+	defer cleanup()
 
 	collection := models.Collection{
 		ID:          "test1",
@@ -386,42 +334,26 @@ func TestExportCollection(t *testing.T) {
 			},
 		},
 	}
-	err := collection.Save(tempDir)
-	if err != nil {
-		t.Errorf("Failed to save collection %v", err)
-		return
+	if err := collection.Save(tempDir); err != nil {
+		t.Fatalf("Failed to save collection: %v", err)
 	}
 
-	req, _ := http.NewRequest("GET", "/pumoide-api/collections?action=export&id=test1&path="+tempDir, nil)
+	req, err := http.NewRequest("GET", "/pumoide-api/collections?action=export&id=test1", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 	rr := httptest.NewRecorder()
 
-	handler := http.HandlerFunc(handleCollections)
-	handler.ServeHTTP(rr, req)
+	handler.Handle(rr, req)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
 	}
 
-	var exportedCollection struct {
-		Info struct {
-			Name        string `json:"name"`
-			Description string `json:"description"`
-			Schema      string `json:"schema"`
-		} `json:"info"`
-		Item []struct {
-			Name    string `json:"name"`
-			Request struct {
-				Method string            `json:"method"`
-				URL    string            `json:"url"`
-				Header []models.Header   `json:"header"`
-				Body   map[string]string `json:"body"`
-			} `json:"request"`
-		} `json:"item"`
-	}
+	var exportedCollection models.ExportedCollection
 	err = json.Unmarshal(rr.Body.Bytes(), &exportedCollection)
 	if err != nil {
-		t.Errorf("failed to unmarshall %v", err)
-		return
+		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
 	if exportedCollection.Info.Name != "Test Collection" {
