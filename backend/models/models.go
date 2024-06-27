@@ -7,33 +7,31 @@ import (
 	"path/filepath"
 )
 
-type Collection struct {
-	ID       string    `json:"id"`
-	Name     string    `json:"name"`
-	Requests []Request `json:"requests"`
+type Header struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 type Request struct {
-	ID          string            `json:"id"`
-	Method      string            `json:"method"`
-	URL         string            `json:"url"`
-	QueryParams map[string]string `json:"queryParams"`
-	Headers     map[string]string `json:"headers"`
-	Body        string            `json:"body"`
-	AuthType    string            `json:"authType"`
-	AuthToken   string            `json:"authToken"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Method  string   `json:"method"`
+	URL     string   `json:"url"`
+	Headers []Header `json:"headers"`
+	Body    string   `json:"body"`
 }
 
-func (c *Collection) ensureRequestIDs() {
-	for i := range c.Requests {
-		if c.Requests[i].ID == "" {
-			c.Requests[i].ID = uuid.New().String()
-		}
-	}
+type Collection struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Requests    []Request `json:"requests"`
 }
 
 func (c *Collection) Save(path string) error {
-	c.ensureRequestIDs()
+	if c.ID == "" {
+		c.ID = uuid.New().String()
+	}
 	data, err := json.Marshal(c)
 	if err != nil {
 		return err
@@ -48,11 +46,7 @@ func LoadCollection(path string, id string) (*Collection, error) {
 	}
 	var collection Collection
 	err = json.Unmarshal(data, &collection)
-	if err != nil {
-		return nil, err
-	}
-	collection.ensureRequestIDs()
-	return &collection, nil
+	return &collection, err
 }
 
 func (c *Collection) AddRequest(request Request) {
