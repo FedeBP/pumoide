@@ -9,4 +9,7 @@ func InitRoutes() {
 	defaultPath := utils.GetDefaultCollectionsPath()
 	collectionHandler := NewCollectionHandler(defaultPath)
 	http.HandleFunc("/pumoide-api/collections", collectionHandler.Handle)
+
+	requestHandler := NewRequestHandler()
+	http.HandleFunc("/pumoide-api/execute", requestHandler.Handle)
 }

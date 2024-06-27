@@ -13,12 +13,13 @@ type Header struct {
 }
 
 type Request struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Method  string   `json:"method"`
-	URL     string   `json:"url"`
-	Headers []Header `json:"headers"`
-	Body    string   `json:"body"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Method      string            `json:"method"`
+	URL         string            `json:"url"`
+	Headers     []Header          `json:"headers"`
+	QueryParams map[string]string `json:"queryParams"`
+	Body        string            `json:"body"`
 }
 
 type Collection struct {
