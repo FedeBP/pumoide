@@ -1,8 +1,9 @@
-package api
+package tests
 
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/FedeBP/pumoide/backend/api"
 	"github.com/FedeBP/pumoide/backend/models"
 	"net/http"
 	"net/http/httptest"
@@ -11,13 +12,13 @@ import (
 	"testing"
 )
 
-func setupTestEnvironment(t *testing.T) (string, *CollectionHandler, func()) {
+func setupTestEnvironment(t *testing.T) (string, *api.CollectionHandler, func()) {
 	tempDir, err := os.MkdirTemp("", "api_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 
-	handler := NewCollectionHandler(tempDir)
+	handler := api.NewCollectionHandler(tempDir)
 
 	cleanup := func() {
 		if err := os.RemoveAll(tempDir); err != nil {
@@ -111,7 +112,7 @@ func TestAddRequestToCollection(t *testing.T) {
 		t.Fatalf("Failed to save collection: %v", err)
 	}
 
-	request := models.Request{Method: "GET", URL: "http://example.com/api"}
+	request := models.Request{Method: models.MethodGet, URL: "http://example.com/api"}
 	body, err := json.Marshal(request)
 	if err != nil {
 		t.Fatalf("Failed to marshal request: %v", err)
@@ -302,6 +303,10 @@ func TestImportCollection(t *testing.T) {
 	err = json.Unmarshal(rr.Body.Bytes(), &responseCollection)
 	if err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if responseCollection.Requests[0].Method != models.MethodGet {
+		t.Errorf("Imported request has invalid method: got %v, want %v", responseCollection.Requests[0].Method, models.MethodGet)
 	}
 
 	if responseCollection.Name != "Imported Collection" {

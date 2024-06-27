@@ -1,6 +1,7 @@
-package models
+package tests
 
 import (
+	"github.com/FedeBP/pumoide/backend/models"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,17 +21,17 @@ func TestCollectionSaveAndLoad(t *testing.T) {
 	}(tempDir)
 
 	// Create a test collection
-	collection := &Collection{
+	collection := &models.Collection{
 		ID:          "test-id",
 		Name:        "Test Collection",
 		Description: "Test Description",
-		Requests: []Request{
+		Requests: []models.Request{
 			{
 				ID:     "req1",
 				Name:   "Test Request",
-				Method: "GET",
+				Method: models.MethodGet,
 				URL:    "http://example.com",
-				Headers: []Header{
+				Headers: []models.Header{
 					{Key: "Content-Type", Value: "application/json"},
 				},
 				Body: `{"key": "value"}`,
@@ -50,7 +51,7 @@ func TestCollectionSaveAndLoad(t *testing.T) {
 	}
 
 	// Test Load
-	loadedCollection, err := LoadCollection(tempDir, "test-id")
+	loadedCollection, err := models.LoadCollection(tempDir, "test-id")
 	if err != nil {
 		t.Fatalf("Failed to load collection: %v", err)
 	}
@@ -101,15 +102,15 @@ func TestCollectionSaveAndLoad(t *testing.T) {
 }
 
 func TestAddRequest(t *testing.T) {
-	collection := &Collection{
+	collection := &models.Collection{
 		ID:   "test-id",
 		Name: "Test Collection",
 	}
 
-	request := Request{
+	request := models.Request{
 		ID:     "req1",
 		Name:   "Test Request",
-		Method: "GET",
+		Method: models.MethodGet,
 		URL:    "http://example.com",
 	}
 
@@ -125,10 +126,10 @@ func TestAddRequest(t *testing.T) {
 }
 
 func TestRemoveRequest(t *testing.T) {
-	collection := &Collection{
+	collection := &models.Collection{
 		ID:   "test-id",
 		Name: "Test Collection",
-		Requests: []Request{
+		Requests: []models.Request{
 			{ID: "req1", Name: "Request 1"},
 			{ID: "req2", Name: "Request 2"},
 		},
@@ -150,5 +151,19 @@ func TestRemoveRequest(t *testing.T) {
 	removed = collection.RemoveRequest("non-existent")
 	if removed {
 		t.Errorf("RemoveRequest returned true for non-existent request, expected false")
+	}
+}
+
+func TestMethodIsValid(t *testing.T) {
+	validMethods := []models.Method{models.MethodGet, models.MethodPost, models.MethodPut, models.MethodDelete, models.MethodPatch, models.MethodHead, models.MethodOptions, models.MethodTrace, models.MethodConnect}
+	for _, method := range validMethods {
+		if !method.IsValid() {
+			t.Errorf("Method %s should be valid", method)
+		}
+	}
+
+	invalidMethod := models.Method("INVALID")
+	if invalidMethod.IsValid() {
+		t.Errorf("Method INVALID should not be valid")
 	}
 }

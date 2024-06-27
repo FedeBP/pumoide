@@ -1,8 +1,10 @@
-package api
+package tests
 
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/FedeBP/pumoide/backend/api"
+	"github.com/FedeBP/pumoide/backend/utils"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -37,7 +39,7 @@ func TestRequestHandler_Handle(t *testing.T) {
 
 	// Create a request to test
 	testRequest := models.Request{
-		Method: http.MethodGet,
+		Method: models.MethodGet,
 		URL:    testServer.URL,
 		Headers: []models.Header{
 			{Key: "Content-Type", Value: "application/json"},
@@ -61,7 +63,7 @@ func TestRequestHandler_Handle(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	// Create our handler and serve the request
-	handler := NewRequestHandler()
+	handler := api.NewRequestHandler(utils.GetDefaultEnvironmentsPath())
 	handler.Handle(rr, req)
 
 	// Check the status code
@@ -87,5 +89,23 @@ func TestRequestHandler_Handle(t *testing.T) {
 	expectedBody := `{"message": "Test response"}`
 	if response.Body != expectedBody {
 		t.Errorf("Expected body %s, got %s", expectedBody, response.Body)
+	}
+}
+
+func TestRequestHandler_InvalidMethod(t *testing.T) {
+	testRequest := models.Request{
+		Method: "INVALID",
+		URL:    "http://example.com",
+	}
+
+	requestBody, _ := json.Marshal(testRequest)
+	req, _ := http.NewRequest(http.MethodPost, "/pumoide-api/execute", bytes.NewBuffer(requestBody))
+	rr := httptest.NewRecorder()
+
+	handler := api.NewRequestHandler("test_env_path")
+	handler.Handle(rr, req)
+
+	if status := rr.Code; status != http.StatusBadRequest {
+		t.Errorf("Handler returned wrong status code for invalid method: got %v want %v", status, http.StatusBadRequest)
 	}
 }

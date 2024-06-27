@@ -7,6 +7,52 @@ import (
 	"path/filepath"
 )
 
+type AuthType string
+
+const (
+	AuthNone     AuthType = "none"
+	AuthBasic    AuthType = "basic"
+	AuthBearer   AuthType = "bearer"
+	AuthAPIKey   AuthType = "apiKey"
+	AuthOAuth2   AuthType = "oauth2"
+	AuthAWSSigV4 AuthType = "awsSigV4"
+	AuthDigest   AuthType = "digest"
+	AuthNTLM     AuthType = "ntlm"
+)
+
+type Auth struct {
+	Type   AuthType          `json:"type"`
+	Params map[string]string `json:"params"`
+}
+
+type Method string
+
+const (
+	MethodGet     Method = "GET"
+	MethodPost    Method = "POST"
+	MethodPut     Method = "PUT"
+	MethodDelete  Method = "DELETE"
+	MethodPatch   Method = "PATCH"
+	MethodHead    Method = "HEAD"
+	MethodOptions Method = "OPTIONS"
+	MethodTrace   Method = "TRACE"
+	MethodConnect Method = "CONNECT"
+)
+
+func GetValidMethods() []Method {
+	return []Method{
+		MethodGet,
+		MethodPost,
+		MethodPut,
+		MethodDelete,
+		MethodPatch,
+		MethodHead,
+		MethodOptions,
+		MethodTrace,
+		MethodConnect,
+	}
+}
+
 type Header struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
@@ -15,11 +61,12 @@ type Header struct {
 type Request struct {
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
-	Method      string            `json:"method"`
+	Method      Method            `json:"method"`
 	URL         string            `json:"url"`
 	Headers     []Header          `json:"headers"`
 	QueryParams map[string]string `json:"queryParams"`
 	Body        string            `json:"body"`
+	Auth        *Auth             `json:"auth,omitempty"`
 }
 
 type Collection struct {
@@ -126,7 +173,7 @@ func (c *Collection) ToExportedCollection() ExportedCollection {
 				Header []Header          `json:"header"`
 				Body   map[string]string `json:"body"`
 			}{
-				Method: req.Method,
+				Method: string(req.Method),
 				URL:    req.URL,
 				Header: req.Headers,
 				Body: map[string]string{
@@ -152,7 +199,7 @@ func NewCollectionFromImported(imported ImportedCollection) Collection {
 		newRequest := Request{
 			ID:      uuid.New().String(),
 			Name:    item.Name,
-			Method:  item.Request.Method,
+			Method:  Method(item.Request.Method),
 			URL:     item.Request.URL,
 			Headers: item.Request.Header,
 		}
@@ -164,4 +211,13 @@ func NewCollectionFromImported(imported ImportedCollection) Collection {
 	}
 
 	return newCollection
+}
+
+func (m Method) IsValid() bool {
+	for _, validMethod := range GetValidMethods() {
+		if m == validMethod {
+			return true
+		}
+	}
+	return false
 }

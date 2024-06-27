@@ -6,10 +6,17 @@ import (
 )
 
 func InitRoutes() {
-	defaultPath := utils.GetDefaultCollectionsPath()
-	collectionHandler := NewCollectionHandler(defaultPath)
+	defaultCollectionsPath := utils.GetDefaultCollectionsPath()
+	collectionHandler := NewCollectionHandler(defaultCollectionsPath)
 	http.HandleFunc("/pumoide-api/collections", collectionHandler.Handle)
 
-	requestHandler := NewRequestHandler()
+	defaultEnvironmentsPath := utils.GetDefaultEnvironmentsPath()
+	requestHandler := NewRequestHandler(defaultEnvironmentsPath)
 	http.HandleFunc("/pumoide-api/execute", requestHandler.Handle)
+
+	environmentHandler := NewEnvironmentHandler(defaultEnvironmentsPath)
+	http.HandleFunc("/pumoide-api/environments", environmentHandler.Handle)
+
+	methodHandler := NewMethodHandler()
+	http.HandleFunc("/pumoide-api/methods", methodHandler.Handle)
 }

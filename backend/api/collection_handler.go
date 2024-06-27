@@ -132,6 +132,13 @@ func (h *CollectionHandler) createCollection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	for _, req := range collection.Requests {
+		if !req.Method.IsValid() {
+			http.Error(w, fmt.Sprintf("Invalid HTTP method in request '%s': %s", req.Name, req.Method), http.StatusBadRequest)
+			return
+		}
+	}
+
 	collection.ID = uuid.New().String()
 
 	savePath := h.getCollectionPath(r)
@@ -155,22 +162,29 @@ func (h *CollectionHandler) createCollection(w http.ResponseWriter, r *http.Requ
 func (h *CollectionHandler) importCollection(w http.ResponseWriter, r *http.Request) {
 	var importedCollection models.ImportedCollection
 	if err := json.NewDecoder(r.Body).Decode(&importedCollection); err != nil {
-		http.Error(w, "Failed to parse imported collection", http.StatusBadRequest)
+		http.Error(w, "Failed to parse imported collection: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	newCollection := models.NewCollectionFromImported(importedCollection)
 
+	for _, req := range newCollection.Requests {
+		if !req.Method.IsValid() {
+			http.Error(w, fmt.Sprintf("Invalid HTTP method in imported request '%s': %s", req.Name, req.Method), http.StatusBadRequest)
+			return
+		}
+	}
+
 	collectionPath := h.getCollectionPath(r)
 	if err := newCollection.Save(collectionPath); err != nil {
-		http.Error(w, "Failed to save imported collection", http.StatusInternalServerError)
+		http.Error(w, "Failed to save imported collection: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(newCollection); err != nil {
-		http.Error(w, "Failed to encode imported collection", http.StatusInternalServerError)
+		http.Error(w, "Failed to encode imported collection: "+err.Error(), http.StatusInternalServerError)
 	}
 }
 
@@ -187,6 +201,13 @@ func (h *CollectionHandler) updateCollection(w http.ResponseWriter, r *http.Requ
 	if err := json.NewDecoder(r.Body).Decode(&updatedCollection); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	for _, req := range updatedCollection.Requests {
+		if !req.Method.IsValid() {
+			http.Error(w, fmt.Sprintf("Invalid HTTP method in request '%s': %s", req.Name, req.Method), http.StatusBadRequest)
+			return
+		}
 	}
 
 	collectionPath := h.getCollectionPath(r)
@@ -223,6 +244,11 @@ func (h *CollectionHandler) addRequestToCollection(w http.ResponseWriter, r *htt
 	var request models.Request
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if !request.Method.IsValid() {
+		http.Error(w, fmt.Sprintf("Invalid HTTP method: %s", request.Method), http.StatusBadRequest)
 		return
 	}
 
