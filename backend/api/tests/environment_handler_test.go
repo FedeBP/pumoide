@@ -45,7 +45,7 @@ func TestEnvironmentHandler(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPost, "/pumoide-api/environments", bytes.NewBuffer(body))
 		rr := httptest.NewRecorder()
 
-		handler.Handle(rr, req)
+		handler.ServeHTTP(rr, req)
 
 		if status := rr.Code; status != http.StatusCreated {
 			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusCreated)
@@ -66,7 +66,7 @@ func TestEnvironmentHandler(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "/pumoide-api/environments", nil)
 		rr := httptest.NewRecorder()
 
-		handler.Handle(rr, req)
+		handler.ServeHTTP(rr, req)
 
 		if status := rr.Code; status != http.StatusOK {
 			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -91,7 +91,7 @@ func TestEnvironmentHandler(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodPut, "/pumoide-api/environments?id="+createdEnvID, bytes.NewBuffer(body))
 		rr := httptest.NewRecorder()
 
-		handler.Handle(rr, req)
+		handler.ServeHTTP(rr, req)
 
 		if status := rr.Code; status != http.StatusOK {
 			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -111,7 +111,7 @@ func TestEnvironmentHandler(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodDelete, "/pumoide-api/environments?id="+createdEnvID, nil)
 		rr := httptest.NewRecorder()
 
-		handler.Handle(rr, req)
+		handler.ServeHTTP(rr, req)
 
 		if status := rr.Code; status != http.StatusOK {
 			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)

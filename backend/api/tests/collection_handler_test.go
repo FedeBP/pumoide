@@ -16,11 +16,11 @@ import (
 var logger *log.Logger
 
 func init() {
-	logFile, err := os.OpenFile("pumoide.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	logFile, err := os.OpenFile("tests.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatal("Failed to open log file:", err)
 	}
-	logger = log.New(logFile, "API: ", log.Ldate|log.Ltime|log.Lshortfile)
+	logger = log.New(logFile, "test: ", log.Ldate|log.Ltime|log.Lshortfile)
 }
 
 func setupTestEnvironment(t *testing.T) (string, *api.CollectionHandler, func()) {
@@ -61,7 +61,7 @@ func TestCreateCollection(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusCreated {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
@@ -98,7 +98,7 @@ func TestGetCollections(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -135,7 +135,7 @@ func TestAddRequestToCollection(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusCreated {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
@@ -169,7 +169,7 @@ func TestDeleteRequestFromCollection(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -217,7 +217,7 @@ func TestUpdateCollection(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -256,7 +256,7 @@ func TestDeleteCollection(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
@@ -304,7 +304,7 @@ func TestImportCollection(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusCreated {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusCreated)
@@ -360,7 +360,7 @@ func TestExportCollection(t *testing.T) {
 	}
 	rr := httptest.NewRecorder()
 
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)

@@ -65,7 +65,7 @@ func TestRequestHandler_Handle(t *testing.T) {
 
 	// Create our handler and serve the request
 	handler := api.NewRequestHandler(utils.GetDefaultEnvironmentsPath(), logger)
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	// Check the status code
 	if status := rr.Code; status != http.StatusOK {
@@ -104,7 +104,7 @@ func TestRequestHandler_InvalidMethod(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	handler := api.NewRequestHandler("test_env_path", logger)
-	handler.Handle(rr, req)
+	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusBadRequest {
 		t.Errorf("Handler returned wrong status code for invalid method: got %v want %v", status, http.StatusBadRequest)

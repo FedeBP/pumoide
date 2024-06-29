@@ -32,7 +32,7 @@ func NewCollectionHandler(defaultPath string, logger *log.Logger) *CollectionHan
 	return &CollectionHandler{DefaultPath: defaultPath, Logger: logger}
 }
 
-func (h *CollectionHandler) Handle(w http.ResponseWriter, r *http.Request) {
+func (h *CollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	action := r.URL.Query().Get("action")
 	switch r.Method {
 	case http.MethodGet:

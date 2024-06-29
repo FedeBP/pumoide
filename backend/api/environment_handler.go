@@ -21,7 +21,7 @@ func NewEnvironmentHandler(defaultPath string, logger *log.Logger) *EnvironmentH
 	return &EnvironmentHandler{DefaultPath: defaultPath, Logger: logger}
 }
 
-func (h *EnvironmentHandler) Handle(w http.ResponseWriter, r *http.Request) {
+func (h *EnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		h.getEnvironments(w, r)

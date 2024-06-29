@@ -33,7 +33,7 @@ func NewRequestHandler(environmentPath string, logger *log.Logger) *RequestHandl
 	}
 }
 
-func (h *RequestHandler) Handle(w http.ResponseWriter, r *http.Request) {
+func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req models.Request
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {

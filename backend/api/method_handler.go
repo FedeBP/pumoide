@@ -17,7 +17,7 @@ func NewMethodHandler(logger *log.Logger) *MethodHandler {
 	return &MethodHandler{Logger: logger}
 }
 
-func (h *MethodHandler) Handle(w http.ResponseWriter, r *http.Request) {
+func (h *MethodHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		apperrors.RespondWithError(w, http.StatusMethodNotAllowed, "Method not allowed", nil, h.Logger)
 		return

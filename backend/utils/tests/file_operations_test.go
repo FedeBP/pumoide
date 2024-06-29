@@ -52,7 +52,7 @@ func TestGetCurrentStorageLocation(t *testing.T) {
 	if !filepath.IsAbs(location) {
 		t.Errorf("GetCurrentStorageLocation should return an absolute path")
 	}
-	if filepath.Base(location) != "pumoide" {
+	if filepath.Base(location) != ".pumoide" {
 		t.Errorf("GetCurrentStorageLocation should end with 'pumoide'")
 	}
 }
