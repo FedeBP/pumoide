@@ -64,7 +64,7 @@ func TestRequestHandler_Handle(t *testing.T) {
 	rr := httptest.NewRecorder()
 
 	// Create our handler and serve the request
-	handler := api.NewRequestHandler(utils.GetDefaultEnvironmentsPath())
+	handler := api.NewRequestHandler(utils.GetDefaultEnvironmentsPath(), logger)
 	handler.Handle(rr, req)
 
 	// Check the status code
@@ -103,14 +103,14 @@ func TestRequestHandler_InvalidMethod(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "/pumoide-api/execute", bytes.NewBuffer(requestBody))
 	rr := httptest.NewRecorder()
 
-	handler := api.NewRequestHandler("test_env_path")
+	handler := api.NewRequestHandler("test_env_path", logger)
 	handler.Handle(rr, req)
 
 	if status := rr.Code; status != http.StatusBadRequest {
 		t.Errorf("Handler returned wrong status code for invalid method: got %v want %v", status, http.StatusBadRequest)
 	}
 
-	expectedErrorMessage := "invalid HTTP method: INVALID"
+	expectedErrorMessage := "Invalid HTTP method: INVALID"
 	if !strings.Contains(rr.Body.String(), expectedErrorMessage) {
 		t.Errorf("Handler returned unexpected error message: got %v want %v", rr.Body.String(), expectedErrorMessage)
 	}

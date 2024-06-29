@@ -18,7 +18,7 @@ func setupEnvironmentTest(t *testing.T) (string, *api.EnvironmentHandler, func()
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 
-	handler := api.NewEnvironmentHandler(tempDir)
+	handler := api.NewEnvironmentHandler(tempDir, logger)
 
 	cleanup := func() {
 		err := os.RemoveAll(tempDir)

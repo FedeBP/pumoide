@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
+	"github.com/FedeBP/pumoide/backend/apperrors"
 	"github.com/FedeBP/pumoide/backend/models"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/signer/v4"
@@ -19,62 +20,24 @@ import (
 type RequestHandler struct {
 	Client          *http.Client
 	EnvironmentPath string
+	Logger          *log.Logger
 }
 
-func NewRequestHandler(environmentPath string) *RequestHandler {
+func NewRequestHandler(environmentPath string, logger *log.Logger) *RequestHandler {
 	return &RequestHandler{
 		Client: &http.Client{
 			Timeout: time.Second * 30,
 		},
 		EnvironmentPath: environmentPath,
+		Logger:          logger,
 	}
-}
-
-func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environment) (*http.Response, error) {
-	if !req.Method.IsValid() {
-		return nil, fmt.Errorf("invalid HTTP method: %s", req.Method)
-	}
-
-	parsedURL, err := url.Parse(h.substituteVariables(req.URL, env))
-	if err != nil {
-		return nil, fmt.Errorf("invalid URL: %w", err)
-	}
-
-	q := parsedURL.Query()
-	for key, value := range req.QueryParams {
-		q.Add(key, h.substituteVariables(value, env))
-	}
-	parsedURL.RawQuery = q.Encode()
-
-	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(h.substituteVariables(req.Body, env)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	for _, header := range req.Headers {
-		httpReq.Header.Set(header.Key, h.substituteVariables(header.Value, env))
-	}
-
-	if req.Auth != nil {
-		err = h.applyAuthentication(httpReq, req.Auth, env)
-		if err != nil {
-			return nil, fmt.Errorf("failed to apply authentication: %w", err)
-		}
-	}
-
-	resp, err := h.Client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to execute request: %w", err)
-	}
-
-	return resp, nil
 }
 
 func (h *RequestHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var req models.Request
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		http.Error(w, "Invalid request body: "+err.Error(), http.StatusBadRequest)
+		apperrors.RespondWithError(w, http.StatusBadRequest, "Invalid request body", err, h.Logger)
 		return
 	}
 
@@ -83,29 +46,30 @@ func (h *RequestHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if envID != "" {
 		env, err = models.LoadEnvironment(h.EnvironmentPath, envID)
 		if err != nil {
-			http.Error(w, "Failed to load environment: "+err.Error(), http.StatusInternalServerError)
+			apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to load environment", err, h.Logger)
 			return
 		}
 	}
 
 	resp, err := h.ExecuteRequest(req, env)
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "invalid HTTP method:") {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+		if strings.HasPrefix(err.Error(), "Invalid HTTP method:") {
+			apperrors.RespondWithError(w, http.StatusBadRequest, err.Error(), nil, h.Logger)
+		} else {
+			apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to execute request", err, h.Logger)
 		}
-		http.Error(w, "Failed to execute request: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			log.Printf("Error closing response body: %v", closeErr)
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			apperrors.RespondWithError(w, http.StatusInternalServerError, "Error closing the body", err, h.Logger)
 		}
-	}()
+	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		http.Error(w, "Failed to read response body: "+err.Error(), http.StatusInternalServerError)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to read response body", err, h.Logger)
 		return
 	}
 
@@ -125,9 +89,49 @@ func (h *RequestHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		http.Error(w, "Failed to encode response: "+err.Error(), http.StatusInternalServerError)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to encode response", err, h.Logger)
 		return
 	}
+}
+
+func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environment) (*http.Response, error) {
+	if !req.Method.IsValid() {
+		return nil, apperrors.NewAppError(http.StatusBadRequest, "Invalid HTTP method", fmt.Errorf("%s", req.Method))
+	}
+
+	parsedURL, err := url.Parse(h.substituteVariables(req.URL, env))
+	if err != nil {
+		return nil, apperrors.NewAppError(http.StatusBadRequest, "Invalid URL", err)
+	}
+
+	q := parsedURL.Query()
+	for key, value := range req.QueryParams {
+		q.Add(key, h.substituteVariables(value, env))
+	}
+	parsedURL.RawQuery = q.Encode()
+
+	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(h.substituteVariables(req.Body, env)))
+	if err != nil {
+		return nil, apperrors.NewAppError(http.StatusInternalServerError, "Failed to create request", err)
+	}
+
+	for _, header := range req.Headers {
+		httpReq.Header.Set(header.Key, h.substituteVariables(header.Value, env))
+	}
+
+	if req.Auth != nil {
+		err = h.applyAuthentication(httpReq, req.Auth, env)
+		if err != nil {
+			return nil, apperrors.NewAppError(http.StatusInternalServerError, "Failed to apply authentication", err)
+		}
+	}
+
+	resp, err := h.Client.Do(httpReq)
+	if err != nil {
+		return nil, apperrors.NewAppError(http.StatusInternalServerError, "Failed to execute request", err)
+	}
+
+	return resp, nil
 }
 
 func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Auth, env *models.Environment) error {
@@ -168,7 +172,7 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 
 		_, err := signer.Sign(req, nil, service, region, time.Now())
 		if err != nil {
-			return fmt.Errorf("failed to sign request with AWS SigV4: %w", err)
+			return apperrors.NewAppError(http.StatusInternalServerError, "Failed to sign request with AWS SigV4", err)
 		}
 	case models.AuthDigest:
 		username := h.substituteVariables(auth.Params["username"], env)
@@ -189,9 +193,9 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 	case models.AuthNTLM:
 		// NTLM authentication is complex and typically requires multiple requests
 		// This is a placeholder for NTLM authentication
-		return fmt.Errorf("NTLM authentication not implemented")
+		return apperrors.NewAppError(http.StatusNotImplemented, "NTLM authentication not implemented", nil)
 	default:
-		return fmt.Errorf("unknown authentication type: %s", auth.Type)
+		return apperrors.NewAppError(http.StatusBadRequest, "Unknown authentication type", fmt.Errorf("%s", auth.Type))
 	}
 	return nil
 }

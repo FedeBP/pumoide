@@ -2,20 +2,24 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
+	"github.com/FedeBP/pumoide/backend/apperrors"
 	"github.com/FedeBP/pumoide/backend/models"
 )
 
-type MethodHandler struct{}
+type MethodHandler struct {
+	Logger *log.Logger
+}
 
-func NewMethodHandler() *MethodHandler {
-	return &MethodHandler{}
+func NewMethodHandler(logger *log.Logger) *MethodHandler {
+	return &MethodHandler{Logger: logger}
 }
 
 func (h *MethodHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		apperrors.RespondWithError(w, http.StatusMethodNotAllowed, "Method not allowed", nil, h.Logger)
 		return
 	}
 
@@ -23,7 +27,7 @@ func (h *MethodHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(validMethods); err != nil {
-		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to encode response", err, h.Logger)
 		return
 	}
 }

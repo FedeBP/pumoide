@@ -2,21 +2,22 @@ package api
 
 import (
 	"github.com/FedeBP/pumoide/backend/utils"
+	"log"
 	"net/http"
 )
 
-func InitRoutes() {
+func InitRoutes(logger *log.Logger) {
 	defaultCollectionsPath := utils.GetDefaultCollectionsPath()
-	collectionHandler := NewCollectionHandler(defaultCollectionsPath)
+	collectionHandler := NewCollectionHandler(defaultCollectionsPath, logger)
 	http.HandleFunc("/pumoide-api/collections", collectionHandler.Handle)
 
 	defaultEnvironmentsPath := utils.GetDefaultEnvironmentsPath()
-	requestHandler := NewRequestHandler(defaultEnvironmentsPath)
+	requestHandler := NewRequestHandler(defaultEnvironmentsPath, logger)
 	http.HandleFunc("/pumoide-api/execute", requestHandler.Handle)
 
-	environmentHandler := NewEnvironmentHandler(defaultEnvironmentsPath)
+	environmentHandler := NewEnvironmentHandler(defaultEnvironmentsPath, logger)
 	http.HandleFunc("/pumoide-api/environments", environmentHandler.Handle)
 
-	methodHandler := NewMethodHandler()
+	methodHandler := NewMethodHandler(logger)
 	http.HandleFunc("/pumoide-api/methods", methodHandler.Handle)
 }

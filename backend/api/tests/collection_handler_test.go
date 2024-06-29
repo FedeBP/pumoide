@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/FedeBP/pumoide/backend/api"
 	"github.com/FedeBP/pumoide/backend/models"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,13 +13,23 @@ import (
 	"testing"
 )
 
+var logger *log.Logger
+
+func init() {
+	logFile, err := os.OpenFile("pumoide.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatal("Failed to open log file:", err)
+	}
+	logger = log.New(logFile, "API: ", log.Ldate|log.Ltime|log.Lshortfile)
+}
+
 func setupTestEnvironment(t *testing.T) (string, *api.CollectionHandler, func()) {
 	tempDir, err := os.MkdirTemp("", "api_test")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 
-	handler := api.NewCollectionHandler(tempDir)
+	handler := api.NewCollectionHandler(tempDir, logger)
 
 	cleanup := func() {
 		if err := os.RemoveAll(tempDir); err != nil {
