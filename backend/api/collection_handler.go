@@ -3,7 +3,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +11,7 @@ import (
 	"github.com/FedeBP/pumoide/backend/models"
 	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 const (
@@ -25,10 +25,10 @@ const (
 
 type CollectionHandler struct {
 	DefaultPath string
-	Logger      *log.Logger
+	Logger      *logrus.Logger
 }
 
-func NewCollectionHandler(defaultPath string, logger *log.Logger) *CollectionHandler {
+func NewCollectionHandler(defaultPath string, logger *logrus.Logger) *CollectionHandler {
 	return &CollectionHandler{DefaultPath: defaultPath, Logger: logger}
 }
 
@@ -171,7 +171,7 @@ func (h *CollectionHandler) importCollection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	newCollection := models.NewCollectionFromImported(importedCollection)
+	newCollection, _ := models.NewCollectionFromImported(importedCollection)
 
 	for _, req := range newCollection.Requests {
 		if !req.Method.IsValid() {
@@ -270,7 +270,11 @@ func (h *CollectionHandler) addRequestToCollection(w http.ResponseWriter, r *htt
 		return
 	}
 
-	collection.AddRequest(request)
+	err = collection.AddRequest(request)
+	if err != nil {
+		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to add request", err, h.Logger)
+		return
+	}
 	if err := collection.Save(collectionPath); err != nil {
 		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to save collection", err, h.Logger)
 		return

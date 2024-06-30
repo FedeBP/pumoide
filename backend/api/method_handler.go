@@ -2,18 +2,18 @@ package api
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 
 	"github.com/FedeBP/pumoide/backend/apperrors"
 	"github.com/FedeBP/pumoide/backend/models"
+	"github.com/sirupsen/logrus"
 )
 
 type MethodHandler struct {
-	Logger *log.Logger
+	Logger *logrus.Logger
 }
 
-func NewMethodHandler(logger *log.Logger) *MethodHandler {
+func NewMethodHandler(logger *logrus.Logger) *MethodHandler {
 	return &MethodHandler{Logger: logger}
 }
 

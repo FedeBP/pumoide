@@ -1,10 +1,11 @@
 package tests
 
 import (
-	"github.com/FedeBP/pumoide/backend/utils"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/FedeBP/pumoide/backend/utils"
 )
 
 func TestGetDefaultCollectionsPath(t *testing.T) {

@@ -2,11 +2,11 @@ package tests
 
 import (
 	"encoding/json"
-	"github.com/FedeBP/pumoide/backend/api"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/FedeBP/pumoide/backend/api"
 	"github.com/FedeBP/pumoide/backend/models"
 )
 

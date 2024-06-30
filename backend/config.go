@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/FedeBP/pumoide/backend/utils"
 	"golang.org/x/time/rate"
 	"log"
 	"net"
@@ -10,6 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/FedeBP/pumoide/backend/utils"
+	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
@@ -20,12 +22,13 @@ type Config struct {
 	DefaultEnvironmentsPath string
 	LogFilePath             string
 	LogFileName             string
+	LogLevel                string
 	ClientTimeout           time.Duration
 }
 
 type Pumoide struct {
 	config *Config
-	logger *log.Logger
+	logger *logrus.Logger
 	router *http.ServeMux
 }
 
@@ -58,8 +61,8 @@ func (a *Pumoide) Start() error {
 	return http.Serve(listener, a.router)
 }
 
-func LoadConfig() *Config {
-	return &Config{
+func InitPumoide() (*Pumoide, error) {
+	config := &Config{
 		Port:                    ":0",
 		RateLimit:               rate.Limit(10),
 		RateLimitBurst:          30,
@@ -67,34 +70,32 @@ func LoadConfig() *Config {
 		DefaultEnvironmentsPath: utils.GetDefaultEnvironmentsPath(),
 		LogFilePath:             utils.GetDefaultLogsPath(),
 		LogFileName:             "pumoide.log",
+		LogLevel:                "info",
 		ClientTimeout:           30 * time.Second,
 	}
-}
 
-func NewPumoide(config *Config) (*Pumoide, error) {
-	logger, err := initLogger(config)
-	if err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+	logger := logrus.New()
+
+	logFilePath := filepath.Join(config.LogFilePath, config.LogFileName)
+
+	file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		logger.Out = file
+	} else {
+		logger.Info("Failed to log to file, using default stderr")
 	}
+
+	level, err := logrus.ParseLevel(config.LogLevel)
+	if err != nil {
+		level = logrus.InfoLevel
+	}
+	logger.SetLevel(level)
+
+	logger.SetFormatter(&logrus.JSONFormatter{})
 
 	return &Pumoide{
 		config: config,
 		logger: logger,
 		router: http.NewServeMux(),
 	}, nil
-}
-
-func initLogger(config *Config) (*log.Logger, error) {
-	if err := utils.EnsureDir(config.LogFilePath); err != nil {
-		return nil, fmt.Errorf("failed to create log directory: %w", err)
-	}
-
-	logFilePath := filepath.Join(config.LogFilePath, config.LogFileName)
-
-	logFile, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open log file: %w", err)
-	}
-
-	return log.New(logFile, "Pumoide: ", log.Ldate|log.Ltime|log.Lshortfile), nil
 }

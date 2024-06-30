@@ -1,9 +1,10 @@
 package main
 
 import (
-	"github.com/FedeBP/pumoide/backend/api"
 	"golang.org/x/time/rate"
 	"net/http"
+
+	"github.com/FedeBP/pumoide/backend/api"
 )
 
 type RateLimitedHandler struct {

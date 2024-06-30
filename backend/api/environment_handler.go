@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -10,21 +9,22 @@ import (
 	"github.com/FedeBP/pumoide/backend/apperrors"
 	"github.com/FedeBP/pumoide/backend/models"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 type EnvironmentHandler struct {
 	DefaultPath string
-	Logger      *log.Logger
+	Logger      *logrus.Logger
 }
 
-func NewEnvironmentHandler(defaultPath string, logger *log.Logger) *EnvironmentHandler {
+func NewEnvironmentHandler(defaultPath string, logger *logrus.Logger) *EnvironmentHandler {
 	return &EnvironmentHandler{DefaultPath: defaultPath, Logger: logger}
 }
 
 func (h *EnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		h.getEnvironments(w, r)
+		h.getEnvironments(w)
 	case http.MethodPost:
 		h.createEnvironment(w, r)
 	case http.MethodPut:
@@ -36,7 +36,7 @@ func (h *EnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *EnvironmentHandler) getEnvironments(w http.ResponseWriter, r *http.Request) {
+func (h *EnvironmentHandler) getEnvironments(w http.ResponseWriter) {
 	files, err := filepath.Glob(filepath.Join(h.DefaultPath, "*.json"))
 	if err != nil {
 		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to read environments", err, h.Logger)

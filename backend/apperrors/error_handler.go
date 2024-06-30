@@ -2,8 +2,9 @@ package apperrors
 
 import (
 	"fmt"
-	"log"
 	"net/http"
+
+	"github.com/sirupsen/logrus"
 )
 
 type AppError struct {
@@ -27,12 +28,14 @@ func NewAppError(code int, message string, err error) *AppError {
 	}
 }
 
-func RespondWithError(w http.ResponseWriter, statusCode int, message string, err error, logger *log.Logger) {
+func RespondWithError(w http.ResponseWriter, statusCode int, message string, err error, logger *logrus.Logger) {
 	appErr := NewAppError(statusCode, message, err)
-	if err != nil {
-		logger.Printf("[%d] %s: %v", statusCode, message, err)
-	} else {
-		logger.Printf("[%d] %s", statusCode, message)
+	if logger != nil {
+		logger.WithFields(logrus.Fields{
+			"statusCode": statusCode,
+			"message":    message,
+			"error":      err,
+		}).Error("API error")
 	}
 	http.Error(w, appErr.Error(), statusCode)
 }

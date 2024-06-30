@@ -3,12 +3,12 @@ package tests
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/FedeBP/pumoide/backend/api"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
 
+	"github.com/FedeBP/pumoide/backend/api"
 	"github.com/FedeBP/pumoide/backend/models"
 )
 
@@ -59,7 +59,7 @@ func TestEnvironmentHandler(t *testing.T) {
 		if responseEnv.Name != "Test Env" {
 			t.Errorf("Handler returned wrong environment name: got %v want %v", responseEnv.Name, "Test Env")
 		}
-		createdEnvID = responseEnv.ID // Store the created environment ID
+		createdEnvID = responseEnv.ID
 	})
 
 	t.Run("GetEnvironments", func(t *testing.T) {

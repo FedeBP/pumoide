@@ -1,9 +1,10 @@
 package tests
 
 import (
-	"github.com/FedeBP/pumoide/backend/models"
 	"os"
 	"testing"
+
+	"github.com/FedeBP/pumoide/backend/models"
 )
 
 func TestEnvironmentSaveAndLoad(t *testing.T) {

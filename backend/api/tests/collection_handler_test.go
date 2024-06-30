@@ -3,24 +3,31 @@ package tests
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/FedeBP/pumoide/backend/api"
-	"github.com/FedeBP/pumoide/backend/models"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/FedeBP/pumoide/backend/api"
+	"github.com/FedeBP/pumoide/backend/models"
+	"github.com/sirupsen/logrus"
 )
 
-var logger *log.Logger
+var logger *logrus.Logger
 
 func init() {
-	logFile, err := os.OpenFile("tests.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatal("Failed to open log file:", err)
+	logger := logrus.New()
+
+	file, err := os.OpenFile("tests.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err == nil {
+		logger.Out = file
+	} else {
+		logger.Debugf("Failed to log to file, using default stderr")
 	}
-	logger = log.New(logFile, "test: ", log.Ldate|log.Ltime|log.Lshortfile)
+	logger.SetLevel(logrus.DebugLevel)
+
+	logger.SetFormatter(&logrus.JSONFormatter{})
 }
 
 func setupTestEnvironment(t *testing.T) (string, *api.CollectionHandler, func()) {
@@ -47,7 +54,7 @@ func TestCreateCollection(t *testing.T) {
 	collection := models.Collection{
 		Name: "Test Collection",
 		Requests: []models.Request{
-			{Method: "GET", URL: "http://example.com"},
+			{Method: "GET", Name: "Test Request", URL: "http://example.com"},
 		},
 	}
 	body, err := json.Marshal(collection)
@@ -81,7 +88,6 @@ func TestGetCollections(t *testing.T) {
 	tempDir, handler, cleanup := setupTestEnvironment(t)
 	defer cleanup()
 
-	// Create some test collections
 	collections := []models.Collection{
 		{ID: "test1", Name: "Test Collection 1"},
 		{ID: "test2", Name: "Test Collection 2"},
@@ -123,7 +129,7 @@ func TestAddRequestToCollection(t *testing.T) {
 		t.Fatalf("Failed to save collection: %v", err)
 	}
 
-	request := models.Request{Method: models.MethodGet, URL: "http://example.com/api"}
+	request := models.Request{Method: models.MethodGet, Name: "Test Request", URL: "http://example.com/api"}
 	body, err := json.Marshal(request)
 	if err != nil {
 		t.Fatalf("Failed to marshal request: %v", err)
@@ -157,7 +163,7 @@ func TestDeleteRequestFromCollection(t *testing.T) {
 	collection := models.Collection{
 		ID:       "test1",
 		Name:     "Test Collection",
-		Requests: []models.Request{{ID: "req1", Method: "GET", URL: "http://example.com/api"}},
+		Requests: []models.Request{{ID: "req1", Method: "GET", Name: "Test request", URL: "http://example.com/api"}},
 	}
 	if err := collection.Save(tempDir); err != nil {
 		t.Fatalf("Failed to save collection: %v", err)
@@ -192,7 +198,7 @@ func TestUpdateCollection(t *testing.T) {
 		ID:   "test1",
 		Name: "Test Collection",
 		Requests: []models.Request{
-			{ID: "req1", Method: "GET", URL: "http://example.com/api"},
+			{ID: "req1", Method: "GET", Name: "Test request", URL: "http://example.com/api"},
 		},
 	}
 	if err := collection.Save(tempDir); err != nil {
@@ -202,8 +208,8 @@ func TestUpdateCollection(t *testing.T) {
 	updatedCollection := models.Collection{
 		Name: "Updated Test Collection",
 		Requests: []models.Request{
-			{ID: "req1", Method: "POST", URL: "http://example.com/api/updated"},
-			{ID: "req2", Method: "GET", URL: "http://example.com/api/new"},
+			{ID: "req1", Method: "POST", Name: "Test request", URL: "http://example.com/api/updated"},
+			{ID: "req2", Method: "GET", Name: "Test request 2", URL: "http://example.com/api/new"},
 		},
 	}
 	body, err := json.Marshal(updatedCollection)
@@ -243,7 +249,7 @@ func TestDeleteCollection(t *testing.T) {
 		ID:   "test1",
 		Name: "Test Collection",
 		Requests: []models.Request{
-			{ID: "req1", Method: "GET", URL: "http://example.com/api"},
+			{ID: "req1", Method: "GET", Name: "Test request", URL: "http://example.com/api"},
 		},
 	}
 	if err := collection.Save(tempDir); err != nil {

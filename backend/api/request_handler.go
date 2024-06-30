@@ -5,25 +5,26 @@ import (
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
-	"github.com/FedeBP/pumoide/backend/apperrors"
-	"github.com/FedeBP/pumoide/backend/models"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/signer/v4"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/FedeBP/pumoide/backend/apperrors"
+	"github.com/FedeBP/pumoide/backend/models"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/signer/v4"
+	"github.com/sirupsen/logrus"
 )
 
 type RequestHandler struct {
 	Client          *http.Client
 	EnvironmentPath string
-	Logger          *log.Logger
+	Logger          *logrus.Logger
 }
 
-func NewRequestHandler(environmentPath string, logger *log.Logger) *RequestHandler {
+func NewRequestHandler(environmentPath string, logger *logrus.Logger) *RequestHandler {
 	return &RequestHandler{
 		Client: &http.Client{
 			Timeout: time.Second * 30,
@@ -144,9 +145,11 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 		username := h.substituteVariables(auth.Params["username"], env)
 		password := h.substituteVariables(auth.Params["password"], env)
 		req.SetBasicAuth(username, password)
+
 	case models.AuthBearer:
 		token := h.substituteVariables(auth.Params["token"], env)
 		req.Header.Set("Authorization", "Bearer "+token)
+
 	case models.AuthAPIKey:
 		key := h.substituteVariables(auth.Params["key"], env)
 		value := h.substituteVariables(auth.Params["value"], env)
@@ -157,9 +160,11 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 			q.Add(key, value)
 			req.URL.RawQuery = q.Encode()
 		}
+
 	case models.AuthOAuth2:
 		token := h.substituteVariables(auth.Params["access_token"], env)
 		req.Header.Set("Authorization", "Bearer "+token)
+
 	case models.AuthAWSSigV4:
 		accessKey := h.substituteVariables(auth.Params["access_key"], env)
 		secretKey := h.substituteVariables(auth.Params["secret_key"], env)
@@ -174,6 +179,7 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 		if err != nil {
 			return apperrors.NewAppError(http.StatusInternalServerError, "Failed to sign request with AWS SigV4", err)
 		}
+
 	case models.AuthDigest:
 		username := h.substituteVariables(auth.Params["username"], env)
 		password := h.substituteVariables(auth.Params["password"], env)
@@ -190,13 +196,11 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 		auth := fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=%s, nc=%s, cnonce="%s", response="%x"`,
 			username, realm, nonce, req.URL.Path, qop, nc, cnonce, response)
 		req.Header.Set("Authorization", auth)
-	case models.AuthNTLM:
-		// NTLM authentication is complex and typically requires multiple requests
-		// This is a placeholder for NTLM authentication
-		return apperrors.NewAppError(http.StatusNotImplemented, "NTLM authentication not implemented", nil)
+
 	default:
 		return apperrors.NewAppError(http.StatusBadRequest, "Unknown authentication type", fmt.Errorf("%s", auth.Type))
 	}
+
 	return nil
 }
 
