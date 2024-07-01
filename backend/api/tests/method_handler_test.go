@@ -11,7 +11,7 @@ import (
 )
 
 func TestMethodHandler(t *testing.T) {
-	handler := api.NewMethodHandler(logger)
+	handler := &api.MethodHandler{Logger: logger}
 
 	req, _ := http.NewRequest(http.MethodGet, "/pumoide-api/methods", nil)
 	rr := httptest.NewRecorder()

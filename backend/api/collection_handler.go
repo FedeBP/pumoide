@@ -28,10 +28,6 @@ type CollectionHandler struct {
 	Logger      *logrus.Logger
 }
 
-func NewCollectionHandler(defaultPath string, logger *logrus.Logger) *CollectionHandler {
-	return &CollectionHandler{DefaultPath: defaultPath, Logger: logger}
-}
-
 func (h *CollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	action := r.URL.Query().Get("action")
 	switch r.Method {
@@ -136,9 +132,12 @@ func (h *CollectionHandler) createCollection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	for _, req := range collection.Requests {
-		if !req.Method.IsValid() {
-			var message = fmt.Sprintf("Invalid HTTP method in request '%s': %s", req.Name, req.Method)
+	for i := range collection.Requests {
+		if collection.Requests[i].ID == "" {
+			collection.Requests[i].ID = uuid.New().String()
+		}
+		if !collection.Requests[i].Method.IsValid() {
+			message := fmt.Sprintf("Invalid HTTP method in request '%s': %s", collection.Requests[i].Name, collection.Requests[i].Method)
 			apperrors.RespondWithError(w, http.StatusBadRequest, message, nil, h.Logger)
 			return
 		}

@@ -3,15 +3,26 @@ package tests
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/FedeBP/pumoide/backend/utils"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FedeBP/pumoide/backend/api"
 	"github.com/FedeBP/pumoide/backend/models"
-	"github.com/FedeBP/pumoide/backend/utils"
 )
+
+func newRequestHandler(path string) *api.RequestHandler {
+	return &api.RequestHandler{
+		Client: &http.Client{
+			Timeout: time.Second * 30,
+		},
+		EnvironmentPath: path,
+		Logger:          logger,
+	}
+}
 
 func TestRequestHandler_Handle(t *testing.T) {
 	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -58,7 +69,7 @@ func TestRequestHandler_Handle(t *testing.T) {
 
 	rr := httptest.NewRecorder()
 
-	handler := api.NewRequestHandler(utils.GetDefaultEnvironmentsPath(), logger)
+	handler := newRequestHandler(utils.GetDefaultEnvironmentsPath())
 	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusOK {
@@ -95,7 +106,7 @@ func TestRequestHandler_InvalidMethod(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, "/pumoide-api/execute", bytes.NewBuffer(requestBody))
 	rr := httptest.NewRecorder()
 
-	handler := api.NewRequestHandler("test_env_path", logger)
+	handler := newRequestHandler("test_env_path")
 	handler.ServeHTTP(rr, req)
 
 	if status := rr.Code; status != http.StatusBadRequest {

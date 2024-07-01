@@ -17,10 +17,6 @@ type EnvironmentHandler struct {
 	Logger      *logrus.Logger
 }
 
-func NewEnvironmentHandler(defaultPath string, logger *logrus.Logger) *EnvironmentHandler {
-	return &EnvironmentHandler{DefaultPath: defaultPath, Logger: logger}
-}
-
 func (h *EnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:

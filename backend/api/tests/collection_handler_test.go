@@ -36,7 +36,7 @@ func setupTestEnvironment(t *testing.T) (string, *api.CollectionHandler, func())
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 
-	handler := api.NewCollectionHandler(tempDir, logger)
+	handler := &api.CollectionHandler{DefaultPath: tempDir, Logger: logger}
 
 	cleanup := func() {
 		if err := os.RemoveAll(tempDir); err != nil {

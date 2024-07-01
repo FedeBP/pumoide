@@ -24,16 +24,6 @@ type RequestHandler struct {
 	Logger          *logrus.Logger
 }
 
-func NewRequestHandler(environmentPath string, logger *logrus.Logger) *RequestHandler {
-	return &RequestHandler{
-		Client: &http.Client{
-			Timeout: time.Second * 30,
-		},
-		EnvironmentPath: environmentPath,
-		Logger:          logger,
-	}
-}
-
 func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req models.Request
 	err := json.NewDecoder(r.Body).Decode(&req)
@@ -65,6 +55,7 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err := Body.Close()
 		if err != nil {
 			apperrors.RespondWithError(w, http.StatusInternalServerError, "Error closing the body", err, h.Logger)
+			return
 		}
 	}(resp.Body)
 

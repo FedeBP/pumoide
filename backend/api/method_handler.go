@@ -13,10 +13,6 @@ type MethodHandler struct {
 	Logger *logrus.Logger
 }
 
-func NewMethodHandler(logger *logrus.Logger) *MethodHandler {
-	return &MethodHandler{Logger: logger}
-}
-
 func (h *MethodHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		apperrors.RespondWithError(w, http.StatusMethodNotAllowed, "Method not allowed", nil, h.Logger)
