@@ -17,7 +17,7 @@ import (
 var logger *logrus.Logger
 
 func init() {
-	logger := logrus.New()
+	logger = logrus.New()
 
 	file, err := os.OpenFile("tests.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err == nil {
