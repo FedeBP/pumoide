@@ -8,6 +8,7 @@ import (
 
 	"github.com/FedeBP/pumoide/backend/apperrors"
 	"github.com/FedeBP/pumoide/backend/models"
+	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
@@ -28,14 +29,14 @@ func (h *EnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.deleteEnvironment(w, r)
 	default:
-		apperrors.RespondWithError(w, http.StatusMethodNotAllowed, "Method not allowed", nil, h.Logger)
+		apperrors.RespondWithError(w, http.StatusMethodNotAllowed, utils.MethodNotAllowedErr, nil, h.Logger)
 	}
 }
 
 func (h *EnvironmentHandler) getEnvironments(w http.ResponseWriter) {
 	files, err := filepath.Glob(filepath.Join(h.DefaultPath, "*.json"))
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to read environments", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToReadCollectionErr, err, h.Logger)
 		return
 	}
 
@@ -43,15 +44,15 @@ func (h *EnvironmentHandler) getEnvironments(w http.ResponseWriter) {
 	for _, file := range files {
 		environment, err := models.LoadEnvironment(h.DefaultPath, filepath.Base(file[:len(file)-5]))
 		if err != nil {
-			h.Logger.Printf("Failed to load environment %s: %v", file, err)
+			h.Logger.Printf(utils.FailedToLoadEnvironmentErr+" %s: %v", file, err)
 			continue
 		}
 		environments = append(environments, *environment)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(utils.ContentType, utils.AppJson)
 	if err := json.NewEncoder(w).Encode(environments); err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to encode environments", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
 		return
 	}
 }
@@ -60,43 +61,43 @@ func (h *EnvironmentHandler) createEnvironment(w http.ResponseWriter, r *http.Re
 	var environment models.Environment
 	err := json.NewDecoder(r.Body).Decode(&environment)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusBadRequest, "Failed to parse environment", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusBadRequest, utils.FailedToReadEnvironmentErr, err, h.Logger)
 		return
 	}
 
 	environment.ID = uuid.New().String()
 	err = environment.Save(h.DefaultPath)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to save environment", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToSaveEnvironmentErr, err, h.Logger)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(utils.ContentType, utils.AppJson)
 	w.WriteHeader(http.StatusCreated)
 	err = json.NewEncoder(w).Encode(environment)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to encode environment", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
 		return
 	}
 }
 
 func (h *EnvironmentHandler) updateEnvironment(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		apperrors.RespondWithError(w, http.StatusBadRequest, "Environment ID is required", nil, h.Logger)
+	id := r.URL.Query().Get(utils.ID)
+	if id == utils.EmptyString {
+		apperrors.RespondWithError(w, http.StatusBadRequest, utils.EnvironmentIdRequiredErr, nil, h.Logger)
 		return
 	}
 
 	var updatedEnvironment models.Environment
 	err := json.NewDecoder(r.Body).Decode(&updatedEnvironment)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusBadRequest, "Failed to parse updated environment", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusBadRequest, utils.FailedToReadEnvironmentErr, err, h.Logger)
 		return
 	}
 
 	existingEnvironment, err := models.LoadEnvironment(h.DefaultPath, id)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusNotFound, "Environment not found", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusNotFound, utils.EnvironmentNotFoundErr, err, h.Logger)
 		return
 	}
 
@@ -105,22 +106,22 @@ func (h *EnvironmentHandler) updateEnvironment(w http.ResponseWriter, r *http.Re
 
 	err = existingEnvironment.Save(h.DefaultPath)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to save updated environment", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToSaveEnvironmentErr, err, h.Logger)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(utils.ContentType, utils.AppJson)
 	err = json.NewEncoder(w).Encode(existingEnvironment)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to encode environment", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
 		return
 	}
 }
 
 func (h *EnvironmentHandler) deleteEnvironment(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	if id == "" {
-		apperrors.RespondWithError(w, http.StatusBadRequest, "Environment ID is required", nil, h.Logger)
+	id := r.URL.Query().Get(utils.ID)
+	if id == utils.EmptyString {
+		apperrors.RespondWithError(w, http.StatusBadRequest, utils.EnvironmentIdRequiredErr, nil, h.Logger)
 		return
 	}
 
@@ -128,16 +129,16 @@ func (h *EnvironmentHandler) deleteEnvironment(w http.ResponseWriter, r *http.Re
 	err := os.Remove(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			apperrors.RespondWithError(w, http.StatusNotFound, "Environment not found", err, h.Logger)
+			apperrors.RespondWithError(w, http.StatusNotFound, utils.EnvironmentNotFoundErr, err, h.Logger)
 		} else {
-			apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to delete environment", err, h.Logger)
+			apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToDeleteEnvironmentErr, err, h.Logger)
 		}
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	_, err = w.Write([]byte("Environment deleted successfully"))
+	_, err = w.Write([]byte(utils.EnvironmentDeletedSuccess))
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to write response", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
 	}
 }

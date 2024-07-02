@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/FedeBP/pumoide/backend/apperrors"
+	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/google/uuid"
 )
 
@@ -104,10 +105,10 @@ type ExportedCollection struct {
 
 func (c *Collection) Save(path string) error {
 	if err := c.Validate(); err != nil {
-		return apperrors.NewAppError(http.StatusBadRequest, "Invalid collection", err)
+		return apperrors.NewAppError(http.StatusBadRequest, utils.InvalidCollectionErr, err)
 	}
 
-	if c.ID == "" {
+	if c.ID == utils.EmptyString {
 		c.ID = uuid.New().String()
 	}
 	data, err := json.Marshal(c)
@@ -129,10 +130,10 @@ func LoadCollection(path string, id string) (*Collection, error) {
 
 func (c *Collection) AddRequest(request Request) error {
 	if err := request.Validate(); err != nil {
-		return apperrors.NewAppError(http.StatusBadRequest, "Invalid request", err)
+		return apperrors.NewAppError(http.StatusBadRequest, utils.InvalidRequestErr, err)
 	}
 
-	if request.ID == "" {
+	if request.ID == utils.EmptyString {
 		request.ID = uuid.New().String()
 	}
 	c.Requests = append(c.Requests, request)
@@ -208,14 +209,14 @@ func NewCollectionFromImported(imported ImportedCollection) (Collection, error) 
 		}
 
 		if err := newRequest.Validate(); err != nil {
-			return Collection{}, apperrors.NewAppError(http.StatusBadRequest, "Invalid imported request", err)
+			return Collection{}, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidRequestErr, err)
 		}
 
 		newCollection.Requests = append(newCollection.Requests, newRequest)
 	}
 
 	if err := newCollection.Validate(); err != nil {
-		return Collection{}, apperrors.NewAppError(http.StatusBadRequest, "Invalid imported collection", err)
+		return Collection{}, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidCollectionErr, err)
 	}
 
 	return newCollection, nil
@@ -245,27 +246,27 @@ func (m Method) IsValid() bool {
 }
 
 func (r *Request) Validate() error {
-	if r.Name == "" {
-		return apperrors.NewAppError(http.StatusBadRequest, "Request name cannot be empty", nil)
+	if r.Name == utils.EmptyString {
+		return apperrors.NewAppError(http.StatusBadRequest, utils.EmptyRequestNameErr, nil)
 	}
 
 	if !r.Method.IsValid() {
-		return apperrors.NewAppError(http.StatusMethodNotAllowed, fmt.Sprintf("Invalid HTTP method: %s", r.Method), nil)
+		return apperrors.NewAppError(http.StatusMethodNotAllowed, fmt.Sprintf(utils.InvalidHTTPMethodErr+": %s", r.Method), nil)
 	}
 
 	if _, err := url.Parse(r.URL); err != nil {
-		return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf("invalid URL: %s", r.URL), err)
+		return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.InvalidURLErr+": %s", r.URL), err)
 	}
 
 	for _, header := range r.Headers {
 		if header.Key == "" {
-			return apperrors.NewAppError(http.StatusBadRequest, "Header key cannot be empty", nil)
+			return apperrors.NewAppError(http.StatusBadRequest, utils.EmptyHeaderKeyErr, nil)
 		}
 	}
 
 	if r.Auth != nil {
 		if err := r.Auth.Validate(); err != nil {
-			return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf("invalid authentication: %s", r.Auth), err)
+			return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.InvalidAuthErr, r.Auth), err)
 		}
 	}
 
@@ -278,65 +279,65 @@ func (a *Auth) Validate() error {
 		return nil
 
 	case AuthBasic:
-		if _, ok := a.Params["username"]; !ok {
-			return apperrors.NewAppError(http.StatusBadRequest, "basic auth requires a username", nil)
+		if _, ok := a.Params[utils.Username]; !ok {
+			return apperrors.NewAppError(http.StatusBadRequest, utils.BasicAuthUserErr, nil)
 		}
-		if _, ok := a.Params["password"]; !ok {
-			return apperrors.NewAppError(http.StatusBadRequest, "basic auth requires a password", nil)
+		if _, ok := a.Params[utils.Password]; !ok {
+			return apperrors.NewAppError(http.StatusBadRequest, utils.BasicAuthPassErr, nil)
 		}
 
 	case AuthBearer:
-		if _, ok := a.Params["token"]; !ok {
-			return apperrors.NewAppError(http.StatusBadRequest, "bearer auth requires a token", nil)
+		if _, ok := a.Params[utils.Token]; !ok {
+			return apperrors.NewAppError(http.StatusBadRequest, utils.BearerAuthErr, nil)
 		}
 
 	case AuthAPIKey:
-		if _, ok := a.Params["key"]; !ok {
-			return apperrors.NewAppError(http.StatusBadRequest, "API key auth requires a key", nil)
+		if _, ok := a.Params[utils.Key]; !ok {
+			return apperrors.NewAppError(http.StatusBadRequest, utils.APIKeyErr, nil)
 		}
-		if _, ok := a.Params["value"]; !ok {
-			return apperrors.NewAppError(http.StatusBadRequest, "API key auth requires a value", nil)
+		if _, ok := a.Params[utils.Value]; !ok {
+			return apperrors.NewAppError(http.StatusBadRequest, utils.APIKeyValueErr, nil)
 		}
-		if in, ok := a.Params["in"]; !ok || (in != "header" && in != "query") {
-			return apperrors.NewAppError(http.StatusBadRequest, "API key auth requires 'in' to be either 'header' or 'query'", nil)
+		if in, ok := a.Params[utils.In]; !ok || (in != utils.Header && in != utils.Query) {
+			return apperrors.NewAppError(http.StatusBadRequest, utils.APIKeyInErr, nil)
 		}
 
 	case AuthOAuth2:
-		if _, ok := a.Params["access_token"]; !ok {
-			return apperrors.NewAppError(http.StatusBadRequest, "OAuth2 auth requires an access token", nil)
+		if _, ok := a.Params[utils.AccessToken]; !ok {
+			return apperrors.NewAppError(http.StatusBadRequest, utils.OAuth2TokenErr, nil)
 		}
 
 	case AuthAWSSigV4:
-		requiredParams := []string{"access_key", "secret_key", "region", "service"}
+		requiredParams := []string{utils.AccessKey, utils.SecretKey, utils.Region, utils.Service}
 		for _, param := range requiredParams {
 			if _, ok := a.Params[param]; !ok {
-				return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf("AWS SigV4 auth requires %s", param), nil)
+				return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.AuthAWSErr, param), nil)
 			}
 		}
 
 	case AuthDigest:
-		requiredParams := []string{"username", "password", "realm", "nonce", "qop", "nc", "cnonce"}
+		requiredParams := []string{utils.Username, utils.Password, utils.Realm, utils.Nonce, utils.Qop, utils.NC, utils.Cnonce}
 		for _, param := range requiredParams {
 			if _, ok := a.Params[param]; !ok {
-				return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf("Digest auth requires %s", param), nil)
+				return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.DigestAuthErr, param), nil)
 			}
 		}
 
 	default:
-		return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf("Unsupported auth type: %s", a.Type), nil)
+		return apperrors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.UnsupportedTypeErr, a.Type), nil)
 	}
 
 	return nil
 }
 
 func (c *Collection) Validate() error {
-	if c.Name == "" {
-		return fmt.Errorf("collection name cannot be empty")
+	if c.Name == utils.EmptyString {
+		return fmt.Errorf(utils.EmptyCollectionNameErr)
 	}
 
 	for i, req := range c.Requests {
 		if err := req.Validate(); err != nil {
-			return fmt.Errorf("invalid request at index %d: %w", i, err)
+			return fmt.Errorf(utils.InvalidRequestAtErr, i, err)
 		}
 	}
 

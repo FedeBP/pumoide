@@ -13,6 +13,7 @@ import (
 
 	"github.com/FedeBP/pumoide/backend/apperrors"
 	"github.com/FedeBP/pumoide/backend/models"
+	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/signer/v4"
 	"github.com/sirupsen/logrus"
@@ -28,40 +29,40 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req models.Request
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusBadRequest, "Invalid request body", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusBadRequest, utils.InvalidRequestBodyErr, err, h.Logger)
 		return
 	}
 
-	envID := r.URL.Query().Get("env")
+	envID := r.URL.Query().Get(utils.Env)
 	var env *models.Environment
-	if envID != "" {
+	if envID != utils.EmptyString {
 		env, err = models.LoadEnvironment(h.EnvironmentPath, envID)
 		if err != nil {
-			apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to load environment", err, h.Logger)
+			apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToLoadEnvironmentErr, err, h.Logger)
 			return
 		}
 	}
 
 	resp, err := h.ExecuteRequest(req, env)
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "Invalid HTTP method:") {
+		if strings.HasPrefix(err.Error(), utils.InvalidHTTPMethodErr) {
 			apperrors.RespondWithError(w, http.StatusBadRequest, err.Error(), nil, h.Logger)
 		} else {
-			apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to execute request", err, h.Logger)
+			apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToExecuteRequestErr, err, h.Logger)
 		}
 		return
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			apperrors.RespondWithError(w, http.StatusInternalServerError, "Error closing the body", err, h.Logger)
+			apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToCloseBodyErr, err, h.Logger)
 			return
 		}
 	}(resp.Body)
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to read response body", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToReadResponseErr, err, h.Logger)
 		return
 	}
 
@@ -79,21 +80,21 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		response.Headers[k] = v[0]
 	}
 
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(utils.ContentType, utils.AppJson)
 	if err := json.NewEncoder(w).Encode(response); err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, "Failed to encode response", err, h.Logger)
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
 		return
 	}
 }
 
 func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environment) (*http.Response, error) {
 	if !req.Method.IsValid() {
-		return nil, apperrors.NewAppError(http.StatusBadRequest, "Invalid HTTP method", fmt.Errorf("%s", req.Method))
+		return nil, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidHTTPMethodErr, fmt.Errorf("%s", req.Method))
 	}
 
 	parsedURL, err := url.Parse(h.substituteVariables(req.URL, env))
 	if err != nil {
-		return nil, apperrors.NewAppError(http.StatusBadRequest, "Invalid URL", err)
+		return nil, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidURLErr, err)
 	}
 
 	q := parsedURL.Query()
@@ -104,7 +105,7 @@ func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environm
 
 	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(h.substituteVariables(req.Body, env)))
 	if err != nil {
-		return nil, apperrors.NewAppError(http.StatusInternalServerError, "Failed to create request", err)
+		return nil, apperrors.NewAppError(http.StatusInternalServerError, utils.FailedToCreateRequestErr, err)
 	}
 
 	for _, header := range req.Headers {
@@ -114,13 +115,13 @@ func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environm
 	if req.Auth != nil {
 		err = h.applyAuthentication(httpReq, req.Auth, env)
 		if err != nil {
-			return nil, apperrors.NewAppError(http.StatusInternalServerError, "Failed to apply authentication", err)
+			return nil, apperrors.NewAppError(http.StatusInternalServerError, utils.FailedToAuthenticateErr, err)
 		}
 	}
 
 	resp, err := h.Client.Do(httpReq)
 	if err != nil {
-		return nil, apperrors.NewAppError(http.StatusInternalServerError, "Failed to execute request", err)
+		return nil, apperrors.NewAppError(http.StatusInternalServerError, utils.FailedToExecuteRequestErr, err)
 	}
 
 	return resp, nil
@@ -133,63 +134,62 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 
 	switch auth.Type {
 	case models.AuthBasic:
-		username := h.substituteVariables(auth.Params["username"], env)
-		password := h.substituteVariables(auth.Params["password"], env)
+		username := h.substituteVariables(auth.Params[utils.Username], env)
+		password := h.substituteVariables(auth.Params[utils.Password], env)
 		req.SetBasicAuth(username, password)
 
 	case models.AuthBearer:
-		token := h.substituteVariables(auth.Params["token"], env)
-		req.Header.Set("Authorization", "Bearer "+token)
+		token := h.substituteVariables(auth.Params[utils.Token], env)
+		req.Header.Set(utils.Authorization, utils.Bearer+token)
 
 	case models.AuthAPIKey:
-		key := h.substituteVariables(auth.Params["key"], env)
-		value := h.substituteVariables(auth.Params["value"], env)
-		if auth.Params["in"] == "header" {
+		key := h.substituteVariables(auth.Params[utils.Key], env)
+		value := h.substituteVariables(auth.Params[utils.Value], env)
+		if auth.Params[utils.In] == utils.Header {
 			req.Header.Set(key, value)
-		} else if auth.Params["in"] == "query" {
+		} else if auth.Params[utils.In] == utils.Query {
 			q := req.URL.Query()
 			q.Add(key, value)
 			req.URL.RawQuery = q.Encode()
 		}
 
 	case models.AuthOAuth2:
-		token := h.substituteVariables(auth.Params["access_token"], env)
-		req.Header.Set("Authorization", "Bearer "+token)
+		token := h.substituteVariables(auth.Params[utils.AccessToken], env)
+		req.Header.Set(utils.Authorization, utils.Bearer+token)
 
 	case models.AuthAWSSigV4:
-		accessKey := h.substituteVariables(auth.Params["access_key"], env)
-		secretKey := h.substituteVariables(auth.Params["secret_key"], env)
-		sessionToken := h.substituteVariables(auth.Params["session_token"], env)
-		region := h.substituteVariables(auth.Params["region"], env)
-		service := h.substituteVariables(auth.Params["service"], env)
+		accessKey := h.substituteVariables(auth.Params[utils.AccessKey], env)
+		secretKey := h.substituteVariables(auth.Params[utils.SecretKey], env)
+		sessionToken := h.substituteVariables(auth.Params[utils.SessionToken], env)
+		region := h.substituteVariables(auth.Params[utils.Region], env)
+		service := h.substituteVariables(auth.Params[utils.Service], env)
 
 		creds := credentials.NewStaticCredentials(accessKey, secretKey, sessionToken)
 		signer := v4.NewSigner(creds)
 
 		_, err := signer.Sign(req, nil, service, region, time.Now())
 		if err != nil {
-			return apperrors.NewAppError(http.StatusInternalServerError, "Failed to sign request with AWS SigV4", err)
+			return apperrors.NewAppError(http.StatusInternalServerError, utils.FailedAwsSigV4Err, err)
 		}
 
 	case models.AuthDigest:
-		username := h.substituteVariables(auth.Params["username"], env)
-		password := h.substituteVariables(auth.Params["password"], env)
-		realm := h.substituteVariables(auth.Params["realm"], env)
-		nonce := h.substituteVariables(auth.Params["nonce"], env)
-		qop := h.substituteVariables(auth.Params["qop"], env)
-		nc := h.substituteVariables(auth.Params["nc"], env)
-		cnonce := h.substituteVariables(auth.Params["cnonce"], env)
+		username := h.substituteVariables(auth.Params[utils.Username], env)
+		password := h.substituteVariables(auth.Params[utils.Password], env)
+		realm := h.substituteVariables(auth.Params[utils.Realm], env)
+		nonce := h.substituteVariables(auth.Params[utils.Nonce], env)
+		qop := h.substituteVariables(auth.Params[utils.Qop], env)
+		nc := h.substituteVariables(auth.Params[utils.NC], env)
+		cnonce := h.substituteVariables(auth.Params[utils.Cnonce], env)
 
 		ha1 := md5.Sum([]byte(username + ":" + realm + ":" + password))
 		ha2 := md5.Sum([]byte(req.Method + ":" + req.URL.Path))
 		response := md5.Sum([]byte(fmt.Sprintf("%x:%s:%s:%s:%s:%x", ha1, nonce, nc, cnonce, qop, ha2)))
 
-		auth := fmt.Sprintf(`Digest username="%s", realm="%s", nonce="%s", uri="%s", qop=%s, nc=%s, cnonce="%s", response="%x"`,
-			username, realm, nonce, req.URL.Path, qop, nc, cnonce, response)
-		req.Header.Set("Authorization", auth)
+		auth := fmt.Sprintf(utils.DigestAuth, username, realm, nonce, req.URL.Path, qop, nc, cnonce, response)
+		req.Header.Set(utils.Authorization, auth)
 
 	default:
-		return apperrors.NewAppError(http.StatusBadRequest, "Unknown authentication type", fmt.Errorf("%s", auth.Type))
+		return apperrors.NewAppError(http.StatusBadRequest, utils.UnknownAuthErr, fmt.Errorf("%s", auth.Type))
 	}
 
 	return nil
