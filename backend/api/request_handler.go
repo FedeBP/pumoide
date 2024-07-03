@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,9 +19,8 @@ import (
 	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/signer/v4"
+	"github.com/oliveagle/jsonpath"
 	"github.com/sirupsen/logrus"
-	"golang.org/x/sync/errgroup"
-	"golang.org/x/sync/semaphore"
 )
 
 type RequestHandler struct {
@@ -45,25 +46,16 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToLoadEnvironmentErr, err, h.Logger)
 			return
 		}
+	} else {
+		env = &models.Environment{Variables: make(map[string]string)}
 	}
 
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
 	results, err := h.ExecuteRequests(ctx, requests, env)
 	if err != nil {
 		errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToExecuteRequestErr, err, h.Logger)
-		return
-	}
-
-	allFailed := true
-	for _, result := range results {
-		if result.Error == "" {
-			allFailed = false
-			break
-		}
-	}
-
-	if allFailed {
-		errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedAllRequestsErr, nil, h.Logger)
 		return
 	}
 
@@ -75,34 +67,39 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *RequestHandler) ExecuteRequests(ctx context.Context, requests []models.Request, env *models.Environment) ([]models.RequestResult, error) {
 	results := make([]models.RequestResult, len(requests))
-	sem := semaphore.NewWeighted(int64(h.WorkerCount))
-	g, ctx := errgroup.WithContext(ctx)
+	completedRequests := make(map[string]bool)
 
 	for i, req := range requests {
-		i, req := i, req
-		g.Go(func() error {
-			if err := sem.Acquire(ctx, 1); err != nil {
-				return err
+		select {
+		case <-ctx.Done():
+			return results[:i], ctx.Err()
+		default:
+			for _, depID := range req.DependsOn {
+				if !completedRequests[depID] {
+					return results[:i], fmt.Errorf("dependency %s not completed for request %s", depID, req.ID)
+				}
 			}
-			defer sem.Release(1)
 
-			result := h.executeRequest(req, env)
+			result := h.executeRequest(ctx, req, env, results[:i])
 			results[i] = result
-			return nil
-		})
-	}
 
-	if err := g.Wait(); err != nil {
-		return nil, err
+			completedRequests[req.ID] = true
+
+			if result.Error != "" {
+				return results[:i+1], fmt.Errorf("error in request %s: %s", req.ID, result.Error)
+			}
+		}
 	}
 
 	return results, nil
 }
 
-func (h *RequestHandler) executeRequest(req models.Request, env *models.Environment) models.RequestResult {
+func (h *RequestHandler) executeRequest(ctx context.Context, req models.Request, env *models.Environment, previousResults []models.RequestResult) models.RequestResult {
 	result := models.RequestResult{
 		Request: req,
 	}
+
+	req = h.substituteVariables(req, env, previousResults)
 
 	httpReq, err := h.prepareRequest(req, env)
 	if err != nil {
@@ -110,9 +107,11 @@ func (h *RequestHandler) executeRequest(req models.Request, env *models.Environm
 		return result
 	}
 
-	resp, intError := h.Client.Do(httpReq)
-	if intError != nil {
-		result.Error = fmt.Sprintf("%s: %v", utils.FailedToExecuteRequestErr, intError)
+	httpReq = httpReq.WithContext(ctx)
+
+	resp, clientErr := h.Client.Do(httpReq)
+	if clientErr != nil {
+		result.Error = fmt.Sprintf("%s: %v", utils.FailedToExecuteRequestErr, clientErr)
 		return result
 	}
 	defer func(Body io.ReadCloser) {
@@ -129,14 +128,55 @@ func (h *RequestHandler) executeRequest(req models.Request, env *models.Environm
 		result.Response.Headers[k] = v[0]
 	}
 
-	body, intError := io.ReadAll(resp.Body)
-	if intError != nil {
-		result.Error = fmt.Sprintf("%s: %v", utils.FailedToReadResponseErr, intError)
+	body, clientErr := io.ReadAll(resp.Body)
+	if clientErr != nil {
+		result.Error = fmt.Sprintf("%s: %v", utils.FailedToReadResponseErr, clientErr)
 	} else {
 		result.Response.Body = string(body)
 	}
 
+	if result.Error == "" && len(req.ExtractVariables) > 0 {
+		for varName, extractPath := range req.ExtractVariables {
+			extractedValue, err := extractValueFromResponse(result.Response, extractPath)
+			if err == nil {
+				env.Variables[varName] = extractedValue
+			} else {
+				h.Logger.Warnf("Failed to extract variable %s: %v", varName, err)
+			}
+		}
+	}
+
 	return result
+}
+
+func (h *RequestHandler) substituteVariables(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.Request {
+	substituteFunc := func(input string) string {
+		for key, value := range env.Variables {
+			input = strings.ReplaceAll(input, "{{"+key+"}}", value)
+		}
+
+		for _, prevResult := range previousResults {
+			for varName, extractPath := range prevResult.Request.ExtractVariables {
+				extractedValue, err := extractValueFromResponse(prevResult.Response, extractPath)
+				if err == nil {
+					input = strings.ReplaceAll(input, "{{"+varName+"}}", extractedValue)
+				}
+			}
+		}
+
+		return input
+	}
+
+	req.URL = substituteFunc(req.URL)
+	req.Body = substituteFunc(req.Body)
+	for i, header := range req.Headers {
+		req.Headers[i].Value = substituteFunc(header.Value)
+	}
+	for key, value := range req.QueryParams {
+		req.QueryParams[key] = substituteFunc(value)
+	}
+
+	return req
 }
 
 func (h *RequestHandler) prepareRequest(req models.Request, env *models.Environment) (*http.Request, *errors.AppError) {
@@ -250,4 +290,52 @@ func substituteVariables(input string, env *models.Environment) string {
 		input = strings.ReplaceAll(input, "{{"+key+"}}", value)
 	}
 	return input
+}
+
+func extractValueFromResponse(response models.Response, extractPath string) (string, error) {
+	if strings.HasPrefix(extractPath, "$") {
+		return extractJSONValue(response.Body, extractPath)
+	} else {
+		return extractRegexValue(response.Body, extractPath)
+	}
+}
+
+func extractJSONValue(responseBody string, jsonPath string) (string, error) {
+	var data interface{}
+	err := json.Unmarshal([]byte(responseBody), &data)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse JSON: %v", err)
+	}
+
+	result, err := jsonpath.JsonPathLookup(data, jsonPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to extract value using JSON path: %v", err)
+	}
+
+	switch v := result.(type) {
+	case string:
+		return v, nil
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), nil
+	case bool:
+		return strconv.FormatBool(v), nil
+	default:
+		return fmt.Sprintf("%v", v), nil
+	}
+}
+
+func extractRegexValue(responseBody string, regexPattern string) (string, error) {
+	re, err := regexp.Compile(regexPattern)
+	if err != nil {
+		return "", fmt.Errorf("invalid regex pattern: %v", err)
+	}
+
+	matches := re.FindStringSubmatch(responseBody)
+	if len(matches) > 1 {
+		return matches[1], nil
+	} else if len(matches) == 1 {
+		return matches[0], nil
+	}
+
+	return "", fmt.Errorf("no match found for regex pattern")
 }

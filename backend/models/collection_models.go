@@ -50,24 +50,28 @@ type Header struct {
 }
 
 type Request struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Method      Method            `json:"method"`
-	URL         string            `json:"url"`
-	Headers     []Header          `json:"headers"`
-	QueryParams map[string]string `json:"queryParams"`
-	Body        string            `json:"body"`
-	Auth        *Auth             `json:"auth,omitempty"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	Method           Method            `json:"method"`
+	URL              string            `json:"url"`
+	Headers          []Header          `json:"headers"`
+	QueryParams      map[string]string `json:"queryParams"`
+	Body             string            `json:"body"`
+	Auth             *Auth             `json:"auth,omitempty"`
+	DependsOn        []string          `json:"dependsOn,omitempty"`
+	ExtractVariables map[string]string `json:"extractVariables,omitempty"`
 }
 
 type RequestResult struct {
-	Request  Request `json:"request"`
-	Response struct {
-		StatusCode int               `json:"statusCode"`
-		Headers    map[string]string `json:"headers"`
-		Body       string            `json:"body"`
-	} `json:"response"`
-	Error string `json:"error,omitempty"`
+	Request  Request  `json:"request"`
+	Response Response `json:"response"`
+	Error    string   `json:"error,omitempty"`
+}
+
+type Response struct {
+	StatusCode int               `json:"statusCode"`
+	Headers    map[string]string `json:"headers"`
+	Body       string            `json:"body"`
 }
 
 type Collection struct {
