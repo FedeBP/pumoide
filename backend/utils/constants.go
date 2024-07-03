@@ -64,6 +64,7 @@ const (
 	FailedToCreateRequestErr  = "Failed to create request"
 	FailedToCloseBodyErr      = "Failed to close the body"
 	FailedToReadResponseErr   = "Failed to read response body"
+	FailedAllRequestsErr      = "All requests failed"
 )
 
 // Authentication error messages

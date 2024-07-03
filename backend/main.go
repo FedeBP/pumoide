@@ -1,14 +1,16 @@
 package main
 
+import "github.com/FedeBP/pumoide/backend/app"
+
 func main() {
-	pumoide, err := InitPumoide()
+	pumoide, err := app.NewPumoide()
 	if err != nil {
-		pumoide.logger.Fatalf("Failed to start Pumoide service: %v", err)
+		panic(err)
 	}
 
 	pumoide.InitRoutes()
 
 	if err := pumoide.Start(); err != nil {
-		pumoide.logger.Fatalf("Server failed to start: %v", err)
+		pumoide.Logger.Fatalf("Server failed to start: %v", err)
 	}
 }

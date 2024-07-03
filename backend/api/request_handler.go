@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/md5"
 	"encoding/json"
 	"fmt"
@@ -9,15 +10,16 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/FedeBP/pumoide/backend/apperrors"
+	"github.com/FedeBP/pumoide/backend/errors"
 	"github.com/FedeBP/pumoide/backend/models"
 	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/signer/v4"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
 type RequestHandler struct {
@@ -31,7 +33,7 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var requests []models.Request
 	err := json.NewDecoder(r.Body).Decode(&requests)
 	if err != nil {
-		apperrors.RespondWithError(w, http.StatusBadRequest, utils.InvalidRequestBodyErr, err, h.Logger)
+		errors.RespondWithError(w, http.StatusBadRequest, utils.InvalidRequestBodyErr, err, h.Logger)
 		return
 	}
 
@@ -40,49 +42,61 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if envID != utils.EmptyString {
 		env, err = models.LoadEnvironment(h.EnvironmentPath, envID)
 		if err != nil {
-			apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToLoadEnvironmentErr, err, h.Logger)
+			errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToLoadEnvironmentErr, err, h.Logger)
 			return
 		}
 	}
 
-	results := h.ExecuteRequests(requests, env)
+	ctx := r.Context()
+	results, err := h.ExecuteRequests(ctx, requests, env)
+	if err != nil {
+		errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToExecuteRequestErr, err, h.Logger)
+		return
+	}
+
+	allFailed := true
+	for _, result := range results {
+		if result.Error == "" {
+			allFailed = false
+			break
+		}
+	}
+
+	if allFailed {
+		errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedAllRequestsErr, nil, h.Logger)
+		return
+	}
 
 	w.Header().Set(utils.ContentType, utils.AppJson)
 	if err := json.NewEncoder(w).Encode(results); err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
+		errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
 	}
 }
 
-func (h *RequestHandler) ExecuteRequests(requests []models.Request, env *models.Environment) []models.RequestResult {
-	resultChan := make(chan models.RequestResult, len(requests))
-	var wg sync.WaitGroup
+func (h *RequestHandler) ExecuteRequests(ctx context.Context, requests []models.Request, env *models.Environment) ([]models.RequestResult, error) {
+	results := make([]models.RequestResult, len(requests))
+	sem := semaphore.NewWeighted(int64(h.WorkerCount))
+	g, ctx := errgroup.WithContext(ctx)
 
-	semaphore := make(chan struct{}, h.WorkerCount)
+	for i, req := range requests {
+		i, req := i, req
+		g.Go(func() error {
+			if err := sem.Acquire(ctx, 1); err != nil {
+				return err
+			}
+			defer sem.Release(1)
 
-	for _, req := range requests {
-		wg.Add(1)
-		go func(r models.Request) {
-			defer wg.Done()
-
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
-			result := h.executeRequest(r, env)
-			resultChan <- result
-		}(req)
+			result := h.executeRequest(req, env)
+			results[i] = result
+			return nil
+		})
 	}
 
-	go func() {
-		wg.Wait()
-		close(resultChan)
-	}()
-
-	var results []models.RequestResult
-	for result := range resultChan {
-		results = append(results, result)
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
-	return results
+	return results, nil
 }
 
 func (h *RequestHandler) executeRequest(req models.Request, env *models.Environment) models.RequestResult {
@@ -125,14 +139,14 @@ func (h *RequestHandler) executeRequest(req models.Request, env *models.Environm
 	return result
 }
 
-func (h *RequestHandler) prepareRequest(req models.Request, env *models.Environment) (*http.Request, *apperrors.AppError) {
+func (h *RequestHandler) prepareRequest(req models.Request, env *models.Environment) (*http.Request, *errors.AppError) {
 	if !req.Method.IsValid() {
-		return nil, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidHTTPMethodErr, nil)
+		return nil, errors.NewAppError(http.StatusBadRequest, utils.InvalidHTTPMethodErr, nil)
 	}
 
 	parsedURL, err := url.Parse(substituteVariables(req.URL, env))
 	if err != nil {
-		return nil, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidURLErr, err)
+		return nil, errors.NewAppError(http.StatusBadRequest, utils.InvalidURLErr, err)
 	}
 
 	q := parsedURL.Query()
@@ -143,7 +157,7 @@ func (h *RequestHandler) prepareRequest(req models.Request, env *models.Environm
 
 	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(substituteVariables(req.Body, env)))
 	if err != nil {
-		return nil, apperrors.NewAppError(http.StatusInternalServerError, utils.FailedToCreateRequestErr, err)
+		return nil, errors.NewAppError(http.StatusInternalServerError, utils.FailedToCreateRequestErr, err)
 	}
 
 	for _, header := range req.Headers {
@@ -153,7 +167,7 @@ func (h *RequestHandler) prepareRequest(req models.Request, env *models.Environm
 	if req.Auth != nil {
 		err = applyAuthentication(httpReq, req.Auth, env)
 		if err != nil {
-			return nil, apperrors.NewAppError(http.StatusForbidden, utils.FailedToAuthenticateErr, err)
+			return nil, errors.NewAppError(http.StatusForbidden, utils.FailedToAuthenticateErr, err)
 		}
 	}
 
@@ -202,7 +216,7 @@ func applyAuthentication(req *http.Request, auth *models.Auth, env *models.Envir
 
 		_, err := signer.Sign(req, nil, service, region, time.Now())
 		if err != nil {
-			return apperrors.NewAppError(http.StatusInternalServerError, utils.FailedAwsSigV4Err, err)
+			return errors.NewAppError(http.StatusInternalServerError, utils.FailedAwsSigV4Err, err)
 		}
 
 	case models.AuthDigest:
@@ -222,7 +236,7 @@ func applyAuthentication(req *http.Request, auth *models.Auth, env *models.Envir
 		req.Header.Set(utils.Authorization, auth)
 
 	default:
-		return apperrors.NewAppError(http.StatusBadRequest, utils.UnknownAuthErr, fmt.Errorf("%s", auth.Type))
+		return errors.NewAppError(http.StatusBadRequest, utils.UnknownAuthErr, fmt.Errorf("%s", auth.Type))
 	}
 
 	return nil

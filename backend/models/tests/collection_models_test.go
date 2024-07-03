@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/FedeBP/pumoide/backend/apperrors"
+	"github.com/FedeBP/pumoide/backend/errors"
 	"github.com/FedeBP/pumoide/backend/models"
 )
 
@@ -121,7 +121,7 @@ func TestAddRequest(t *testing.T) {
 
 	err := collection.AddRequest(request)
 	if err != nil {
-		_ = apperrors.NewAppError(http.StatusInternalServerError, "Failed to add request", err)
+		_ = errors.NewAppError(http.StatusInternalServerError, "Failed to add request", err)
 		return
 	}
 
