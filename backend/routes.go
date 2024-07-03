@@ -33,6 +33,7 @@ func (a *Pumoide) InitRoutes() {
 			Client:          &http.Client{Timeout: a.config.ClientTimeout},
 			EnvironmentPath: a.config.DefaultEnvironmentsPath,
 			Logger:          a.logger,
+			WorkerCount:     a.config.Workers,
 		},
 		limiter: limiter,
 	})

@@ -60,6 +60,16 @@ type Request struct {
 	Auth        *Auth             `json:"auth,omitempty"`
 }
 
+type RequestResult struct {
+	Request  Request `json:"request"`
+	Response struct {
+		StatusCode int               `json:"statusCode"`
+		Headers    map[string]string `json:"headers"`
+		Body       string            `json:"body"`
+	} `json:"response"`
+	Error string `json:"error,omitempty"`
+}
+
 type Collection struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`

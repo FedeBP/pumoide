@@ -24,6 +24,7 @@ type Config struct {
 	LogFileName             string
 	LogLevel                string
 	ClientTimeout           time.Duration
+	Workers                 int
 }
 
 type Pumoide struct {
@@ -72,6 +73,7 @@ func InitPumoide() (*Pumoide, error) {
 		LogFileName:             "pumoide.log",
 		LogLevel:                "info",
 		ClientTimeout:           30 * time.Second,
+		Workers:                 10,
 	}
 
 	logger := logrus.New()

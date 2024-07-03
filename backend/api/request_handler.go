@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/FedeBP/pumoide/backend/apperrors"
@@ -23,11 +24,12 @@ type RequestHandler struct {
 	Client          *http.Client
 	EnvironmentPath string
 	Logger          *logrus.Logger
+	WorkerCount     int
 }
 
 func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var req models.Request
-	err := json.NewDecoder(r.Body).Decode(&req)
+	var requests []models.Request
+	err := json.NewDecoder(r.Body).Decode(&requests)
 	if err != nil {
 		apperrors.RespondWithError(w, http.StatusBadRequest, utils.InvalidRequestBodyErr, err, h.Logger)
 		return
@@ -43,108 +45,139 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, err := h.ExecuteRequest(req, env)
+	results := h.ExecuteRequests(requests, env)
+
+	w.Header().Set(utils.ContentType, utils.AppJson)
+	if err := json.NewEncoder(w).Encode(results); err != nil {
+		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
+	}
+}
+
+func (h *RequestHandler) ExecuteRequests(requests []models.Request, env *models.Environment) []models.RequestResult {
+	resultChan := make(chan models.RequestResult, len(requests))
+	var wg sync.WaitGroup
+
+	semaphore := make(chan struct{}, h.WorkerCount)
+
+	for _, req := range requests {
+		wg.Add(1)
+		go func(r models.Request) {
+			defer wg.Done()
+
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			result := h.executeRequest(r, env)
+			resultChan <- result
+		}(req)
+	}
+
+	go func() {
+		wg.Wait()
+		close(resultChan)
+	}()
+
+	var results []models.RequestResult
+	for result := range resultChan {
+		results = append(results, result)
+	}
+
+	return results
+}
+
+func (h *RequestHandler) executeRequest(req models.Request, env *models.Environment) models.RequestResult {
+	result := models.RequestResult{
+		Request: req,
+	}
+
+	httpReq, err := h.prepareRequest(req, env)
 	if err != nil {
-		if strings.HasPrefix(err.Error(), utils.InvalidHTTPMethodErr) {
-			apperrors.RespondWithError(w, http.StatusBadRequest, err.Error(), nil, h.Logger)
-		} else {
-			apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToExecuteRequestErr, err, h.Logger)
-		}
-		return
+		result.Error = err.Error()
+		return result
+	}
+
+	resp, intError := h.Client.Do(httpReq)
+	if intError != nil {
+		result.Error = fmt.Sprintf("%s: %v", utils.FailedToExecuteRequestErr, intError)
+		return result
 	}
 	defer func(Body io.ReadCloser) {
 		err := Body.Close()
 		if err != nil {
-			apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToCloseBodyErr, err, h.Logger)
+			result.Error = fmt.Sprintf("%s: %v", utils.FailedToCloseBodyErr, err)
 			return
 		}
 	}(resp.Body)
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToReadResponseErr, err, h.Logger)
-		return
-	}
-
-	response := struct {
-		StatusCode int               `json:"statusCode"`
-		Headers    map[string]string `json:"headers"`
-		Body       string            `json:"body"`
-	}{
-		StatusCode: resp.StatusCode,
-		Headers:    make(map[string]string),
-		Body:       string(body),
-	}
-
+	result.Response.StatusCode = resp.StatusCode
+	result.Response.Headers = make(map[string]string)
 	for k, v := range resp.Header {
-		response.Headers[k] = v[0]
+		result.Response.Headers[k] = v[0]
 	}
 
-	w.Header().Set(utils.ContentType, utils.AppJson)
-	if err := json.NewEncoder(w).Encode(response); err != nil {
-		apperrors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
-		return
+	body, intError := io.ReadAll(resp.Body)
+	if intError != nil {
+		result.Error = fmt.Sprintf("%s: %v", utils.FailedToReadResponseErr, intError)
+	} else {
+		result.Response.Body = string(body)
 	}
+
+	return result
 }
 
-func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environment) (*http.Response, error) {
+func (h *RequestHandler) prepareRequest(req models.Request, env *models.Environment) (*http.Request, *apperrors.AppError) {
 	if !req.Method.IsValid() {
-		return nil, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidHTTPMethodErr, fmt.Errorf("%s", req.Method))
+		return nil, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidHTTPMethodErr, nil)
 	}
 
-	parsedURL, err := url.Parse(h.substituteVariables(req.URL, env))
+	parsedURL, err := url.Parse(substituteVariables(req.URL, env))
 	if err != nil {
 		return nil, apperrors.NewAppError(http.StatusBadRequest, utils.InvalidURLErr, err)
 	}
 
 	q := parsedURL.Query()
 	for key, value := range req.QueryParams {
-		q.Add(key, h.substituteVariables(value, env))
+		q.Add(key, substituteVariables(value, env))
 	}
 	parsedURL.RawQuery = q.Encode()
 
-	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(h.substituteVariables(req.Body, env)))
+	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(substituteVariables(req.Body, env)))
 	if err != nil {
 		return nil, apperrors.NewAppError(http.StatusInternalServerError, utils.FailedToCreateRequestErr, err)
 	}
 
 	for _, header := range req.Headers {
-		httpReq.Header.Set(header.Key, h.substituteVariables(header.Value, env))
+		httpReq.Header.Set(header.Key, substituteVariables(header.Value, env))
 	}
 
 	if req.Auth != nil {
-		err = h.applyAuthentication(httpReq, req.Auth, env)
+		err = applyAuthentication(httpReq, req.Auth, env)
 		if err != nil {
-			return nil, apperrors.NewAppError(http.StatusInternalServerError, utils.FailedToAuthenticateErr, err)
+			return nil, apperrors.NewAppError(http.StatusForbidden, utils.FailedToAuthenticateErr, err)
 		}
 	}
 
-	resp, err := h.Client.Do(httpReq)
-	if err != nil {
-		return nil, apperrors.NewAppError(http.StatusInternalServerError, utils.FailedToExecuteRequestErr, err)
-	}
-
-	return resp, nil
+	return httpReq, nil
 }
 
-func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Auth, env *models.Environment) error {
+func applyAuthentication(req *http.Request, auth *models.Auth, env *models.Environment) error {
 	if auth == nil || auth.Type == models.AuthNone {
 		return nil
 	}
 
 	switch auth.Type {
 	case models.AuthBasic:
-		username := h.substituteVariables(auth.Params[utils.Username], env)
-		password := h.substituteVariables(auth.Params[utils.Password], env)
+		username := substituteVariables(auth.Params[utils.Username], env)
+		password := substituteVariables(auth.Params[utils.Password], env)
 		req.SetBasicAuth(username, password)
 
 	case models.AuthBearer:
-		token := h.substituteVariables(auth.Params[utils.Token], env)
+		token := substituteVariables(auth.Params[utils.Token], env)
 		req.Header.Set(utils.Authorization, utils.Bearer+token)
 
 	case models.AuthAPIKey:
-		key := h.substituteVariables(auth.Params[utils.Key], env)
-		value := h.substituteVariables(auth.Params[utils.Value], env)
+		key := substituteVariables(auth.Params[utils.Key], env)
+		value := substituteVariables(auth.Params[utils.Value], env)
 		if auth.Params[utils.In] == utils.Header {
 			req.Header.Set(key, value)
 		} else if auth.Params[utils.In] == utils.Query {
@@ -154,15 +187,15 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 		}
 
 	case models.AuthOAuth2:
-		token := h.substituteVariables(auth.Params[utils.AccessToken], env)
+		token := substituteVariables(auth.Params[utils.AccessToken], env)
 		req.Header.Set(utils.Authorization, utils.Bearer+token)
 
 	case models.AuthAWSSigV4:
-		accessKey := h.substituteVariables(auth.Params[utils.AccessKey], env)
-		secretKey := h.substituteVariables(auth.Params[utils.SecretKey], env)
-		sessionToken := h.substituteVariables(auth.Params[utils.SessionToken], env)
-		region := h.substituteVariables(auth.Params[utils.Region], env)
-		service := h.substituteVariables(auth.Params[utils.Service], env)
+		accessKey := substituteVariables(auth.Params[utils.AccessKey], env)
+		secretKey := substituteVariables(auth.Params[utils.SecretKey], env)
+		sessionToken := substituteVariables(auth.Params[utils.SessionToken], env)
+		region := substituteVariables(auth.Params[utils.Region], env)
+		service := substituteVariables(auth.Params[utils.Service], env)
 
 		creds := credentials.NewStaticCredentials(accessKey, secretKey, sessionToken)
 		signer := v4.NewSigner(creds)
@@ -173,13 +206,13 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 		}
 
 	case models.AuthDigest:
-		username := h.substituteVariables(auth.Params[utils.Username], env)
-		password := h.substituteVariables(auth.Params[utils.Password], env)
-		realm := h.substituteVariables(auth.Params[utils.Realm], env)
-		nonce := h.substituteVariables(auth.Params[utils.Nonce], env)
-		qop := h.substituteVariables(auth.Params[utils.Qop], env)
-		nc := h.substituteVariables(auth.Params[utils.NC], env)
-		cnonce := h.substituteVariables(auth.Params[utils.Cnonce], env)
+		username := substituteVariables(auth.Params[utils.Username], env)
+		password := substituteVariables(auth.Params[utils.Password], env)
+		realm := substituteVariables(auth.Params[utils.Realm], env)
+		nonce := substituteVariables(auth.Params[utils.Nonce], env)
+		qop := substituteVariables(auth.Params[utils.Qop], env)
+		nc := substituteVariables(auth.Params[utils.NC], env)
+		cnonce := substituteVariables(auth.Params[utils.Cnonce], env)
 
 		ha1 := md5.Sum([]byte(username + ":" + realm + ":" + password))
 		ha2 := md5.Sum([]byte(req.Method + ":" + req.URL.Path))
@@ -195,7 +228,7 @@ func (h *RequestHandler) applyAuthentication(req *http.Request, auth *models.Aut
 	return nil
 }
 
-func (h *RequestHandler) substituteVariables(input string, env *models.Environment) string {
+func substituteVariables(input string, env *models.Environment) string {
 	if env == nil {
 		return input
 	}

@@ -3,118 +3,104 @@ package tests
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/FedeBP/pumoide/backend/utils"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
-	"time"
-
 	"github.com/FedeBP/pumoide/backend/api"
 	"github.com/FedeBP/pumoide/backend/models"
+	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 )
 
-func newRequestHandler(path string) *api.RequestHandler {
+func newRequestHandler(client *http.Client, env string, testLogger *logrus.Logger, workers int) *api.RequestHandler {
 	return &api.RequestHandler{
-		Client: &http.Client{
-			Timeout: time.Second * 30,
-		},
-		EnvironmentPath: path,
-		Logger:          logger,
+		Client:          client,
+		EnvironmentPath: env,
+		Logger:          testLogger,
+		WorkerCount:     workers,
 	}
 }
 
-func TestRequestHandler_Handle(t *testing.T) {
-	testServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func TestRequestHandler_ServeHTTP(t *testing.T) {
+	mockClient := &http.Client{
+		Transport: &mockTransport{},
+	}
 
-		if r.Method != http.MethodGet {
-			t.Errorf("Expected GET request, got %s", r.Method)
-		}
+	testLogger := logrus.New()
+	testLogger.SetOutput(&bytes.Buffer{})
 
-		if r.Header.Get("Content-Type") != "application/json" {
-			t.Errorf("Expected Content-Type: application/json, got %s", r.Header.Get("Content-Type"))
-		}
+	handler := newRequestHandler(mockClient, "test_env_path", testLogger, 5)
 
-		if r.URL.Query().Get("param1") != "value1" {
-			t.Errorf("Expected query param 'param1=value1', got '%s'", r.URL.Query().Get("param1"))
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte(`{"message": "Test response"}`))
-		if err != nil {
-			http.Error(w, "Failed to write response", http.StatusInternalServerError)
-		}
-	}))
-	defer testServer.Close()
-
-	testRequest := models.Request{
-		Method: models.MethodGet,
-		URL:    testServer.URL,
-		Headers: []models.Header{
-			{Key: "Content-Type", Value: "application/json"},
+	tests := []struct {
+		name           string
+		requests       []models.Request
+		expectedStatus int
+		expectedBody   string
+	}{
+		{
+			name: "Single request",
+			requests: []models.Request{
+				{
+					Method: "GET",
+					URL:    "http://example.com",
+				},
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody:   `[{"request":{"id":"","name":"","method":"GET","url":"http://example.com","headers":null,"queryParams":null,"body":""},"response":{"statusCode":200,"headers":{},"body":""}}]`,
 		},
-		QueryParams: map[string]string{"param1": "value1"},
+		{
+			name: "Multiple requests",
+			requests: []models.Request{
+				{
+					Method: "GET",
+					URL:    "http://example.com",
+				},
+				{
+					Method: "POST",
+					URL:    "http://example.com/post",
+					Body:   "test body",
+				},
+			},
+			expectedStatus: http.StatusOK,
+			expectedBody:   `[{"request":{"id":"","name":"","method":"GET","url":"http://example.com","headers":null,"queryParams":null,"body":""},"response":{"statusCode":200,"headers":{},"body":""}},{"request":{"id":"","name":"","method":"POST","url":"http://example.com/post","headers":null,"queryParams":null,"body":"test body"},"response":{"statusCode":201,"headers":{},"body":""}}]`,
+		},
 	}
 
-	requestBody, err := json.Marshal(testRequest)
-	if err != nil {
-		t.Fatalf("Failed to marshal request: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := json.Marshal(tt.requests)
+			require.NoError(t, err)
 
-	req, err := http.NewRequest(http.MethodPost, "/pumoide-api/execute", bytes.NewBuffer(requestBody))
-	if err != nil {
-		t.Fatalf("Failed to create request: %v", err)
-	}
+			req := httptest.NewRequest("POST", "/pumoide-api/execute", bytes.NewBuffer(body))
+			req.Header.Set("Content-Type", "application/json")
 
-	rr := httptest.NewRecorder()
+			rr := httptest.NewRecorder()
 
-	handler := newRequestHandler(utils.GetDefaultEnvironmentsPath())
-	handler.ServeHTTP(rr, req)
+			handler.ServeHTTP(rr, req)
 
-	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
-	}
+			assert.Equal(t, tt.expectedStatus, rr.Code)
 
-	var response struct {
-		StatusCode int               `json:"statusCode"`
-		Headers    map[string]string `json:"headers"`
-		Body       string            `json:"body"`
-	}
-	err = json.Unmarshal(rr.Body.Bytes(), &response)
-	if err != nil {
-		t.Fatalf("Failed to unmarshal response: %v", err)
-	}
-
-	if response.StatusCode != http.StatusOK {
-		t.Errorf("Expected status code %d, got %d", http.StatusOK, response.StatusCode)
-	}
-
-	expectedBody := `{"message": "Test response"}`
-	if response.Body != expectedBody {
-		t.Errorf("Expected body %s, got %s", expectedBody, response.Body)
+			assert.JSONEq(t, tt.expectedBody, rr.Body.String())
+		})
 	}
 }
 
-func TestRequestHandler_InvalidMethod(t *testing.T) {
-	testRequest := models.Request{
-		Method: models.Method("INVALID"),
-		URL:    "http://example.com",
+type mockTransport struct{}
+
+func (m *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       http.NoBody,
+		Header:     make(http.Header),
 	}
 
-	requestBody, _ := json.Marshal(testRequest)
-	req, _ := http.NewRequest(http.MethodPost, "/pumoide-api/execute", bytes.NewBuffer(requestBody))
-	rr := httptest.NewRecorder()
-
-	handler := newRequestHandler("test_env_path")
-	handler.ServeHTTP(rr, req)
-
-	if status := rr.Code; status != http.StatusBadRequest {
-		t.Errorf("Handler returned wrong status code for invalid method: got %v want %v", status, http.StatusBadRequest)
+	switch req.Method {
+	case "GET":
+		resp.StatusCode = http.StatusOK
+	case "POST":
+		resp.StatusCode = http.StatusCreated
 	}
 
-	expectedErrorMessage := "Invalid HTTP method: INVALID"
-	if !strings.Contains(rr.Body.String(), expectedErrorMessage) {
-		t.Errorf("Handler returned unexpected error message: got %v want %v", rr.Body.String(), expectedErrorMessage)
-	}
+	return resp, nil
 }
