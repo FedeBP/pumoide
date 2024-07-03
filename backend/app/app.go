@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/FedeBP/pumoide/backend/logger"
 	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/sirupsen/logrus"
 )
@@ -20,36 +21,13 @@ type Pumoide struct {
 
 func NewPumoide() (*Pumoide, error) {
 	config := LoadConfig()
-	logger := initLogger(config)
+	lgr := logger.GetLogger(filepath.Join(config.LogFilePath, config.LogFileName), config.LogLevel)
 
 	return &Pumoide{
 		Config: config,
-		Logger: logger,
+		Logger: lgr,
 		Router: http.NewServeMux(),
 	}, nil
-}
-
-func initLogger(config *Config) *logrus.Logger {
-	logger := logrus.New()
-
-	logFilePath := filepath.Join(config.LogFilePath, config.LogFileName)
-
-	file, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err == nil {
-		logger.Out = file
-	} else {
-		logger.Info("Failed to log to file, using default stderr")
-	}
-
-	level, err := logrus.ParseLevel(config.LogLevel)
-	if err != nil {
-		level = logrus.InfoLevel
-	}
-	logger.SetLevel(level)
-
-	logger.SetFormatter(&logrus.JSONFormatter{})
-
-	return logger
 }
 
 func (a *Pumoide) Start() error {

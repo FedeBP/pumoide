@@ -1,10 +1,10 @@
 package app
 
 import (
-	"github.com/FedeBP/pumoide/backend/middleware"
 	"net/http"
 
 	"github.com/FedeBP/pumoide/backend/api"
+	"github.com/FedeBP/pumoide/backend/middleware"
 )
 
 func (a *Pumoide) InitRoutes() {
