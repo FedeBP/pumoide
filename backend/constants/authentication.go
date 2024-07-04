@@ -1,15 +1,6 @@
 package constants
 
 const (
-	// Authentication types
-	AuthNone     = "none"
-	AuthBasic    = "basic"
-	AuthBearer   = "bearer"
-	AuthAPIKey   = "apiKey"
-	AuthOAuth2   = "oauth2"
-	AuthAWSSigV4 = "awsSigV4"
-	AuthDigest   = "digest"
-
 	// Auth parameters
 	Username     = "username"
 	Password     = "password"
