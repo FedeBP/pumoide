@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/FedeBP/pumoide/backend/utils"
+	"github.com/FedeBP/pumoide/backend/constants"
 	"github.com/google/uuid"
 )
 
@@ -16,7 +16,7 @@ type Environment struct {
 }
 
 func (e *Environment) Save(path string) error {
-	if e.ID == utils.EmptyString {
+	if e.ID == constants.EmptyString {
 		e.ID = uuid.New().String()
 	}
 	data, err := json.Marshal(e)

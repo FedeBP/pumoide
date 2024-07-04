@@ -113,8 +113,8 @@ func TestEnvironmentHandler(t *testing.T) {
 
 		handler.ServeHTTP(rr, req)
 
-		if status := rr.Code; status != http.StatusOK {
-			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusOK)
+		if status := rr.Code; status != http.StatusNoContent {
+			t.Errorf("Handler returned wrong status code: got %v want %v", status, http.StatusNoContent)
 		}
 	})
 }

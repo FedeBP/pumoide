@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/FedeBP/pumoide/backend/constants"
 	"github.com/FedeBP/pumoide/backend/errors"
 	"github.com/FedeBP/pumoide/backend/models"
-	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -16,7 +16,7 @@ type MethodHandler struct {
 
 func (h *MethodHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		errors.RespondWithError(w, http.StatusMethodNotAllowed, utils.MethodNotAllowedErr, nil, h.Logger)
+		errors.RespondWithError(w, http.StatusMethodNotAllowed, constants.ErrMethodNotAllowed, nil, h.Logger)
 		return
 	}
 
@@ -27,9 +27,9 @@ func (h *MethodHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set(utils.ContentType, utils.AppJson)
+	w.Header().Set(constants.ContentType, constants.AppJson)
 	if err := json.NewEncoder(w).Encode(validMethods); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
+		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 		return
 	}
 }

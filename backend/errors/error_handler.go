@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/FedeBP/pumoide/backend/utils"
+	"github.com/FedeBP/pumoide/backend/constants"
 	"github.com/sirupsen/logrus"
 )
 
@@ -45,7 +45,7 @@ func RespondWithError(w http.ResponseWriter, statusCode int, message string, err
 	}
 	logEntry.Error("Pumoide error")
 
-	w.Header().Set(utils.ContentType, utils.AppJson)
+	w.Header().Set(constants.ContentType, constants.AppJson)
 	w.WriteHeader(statusCode)
 	err = json.NewEncoder(w).Encode(struct {
 		Code    int    `json:"code"`
@@ -57,7 +57,7 @@ func RespondWithError(w http.ResponseWriter, statusCode int, message string, err
 		Error:   appErr.Error(),
 	})
 	if err != nil {
-		logger.WithError(err).Error(utils.FailedToWriteResponseErr)
+		logger.WithError(err).Error(constants.ErrFailedToWriteResponse)
 		return
 	}
 }

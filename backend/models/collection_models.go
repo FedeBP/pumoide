@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/FedeBP/pumoide/backend/constants"
 	"github.com/FedeBP/pumoide/backend/errors"
-	"github.com/FedeBP/pumoide/backend/utils"
 	"github.com/google/uuid"
 )
 
@@ -50,28 +50,37 @@ type Header struct {
 }
 
 type Request struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Method           Method            `json:"method"`
-	URL              string            `json:"url"`
-	Headers          []Header          `json:"headers"`
-	QueryParams      map[string]string `json:"queryParams"`
-	Body             string            `json:"body"`
-	Auth             *Auth             `json:"auth,omitempty"`
-	DependsOn        []string          `json:"dependsOn,omitempty"`
-	ExtractVariables map[string]string `json:"extractVariables,omitempty"`
+	ID                 string              `json:"id"`
+	Name               string              `json:"name"`
+	Method             Method              `json:"method"`
+	URL                string              `json:"url"`
+	Headers            []Header            `json:"headers"`
+	QueryParams        map[string]string   `json:"queryParams"`
+	Body               string              `json:"body"`
+	Auth               *Auth               `json:"auth,omitempty"`
+	DependsOn          []string            `json:"dependsOn,omitempty"`
+	ExtractVariables   map[string]string   `json:"extractVariables,omitempty"`
+	ResponseValidation *ResponseValidation `json:"responseValidation,omitempty"`
 }
 
 type RequestResult struct {
-	Request  Request  `json:"request"`
-	Response Response `json:"response"`
-	Error    string   `json:"error,omitempty"`
+	Request          Request  `json:"request"`
+	Response         Response `json:"response"`
+	Error            string   `json:"error,omitempty"`
+	ValidationErrors []string `json:"validationErrors,omitempty"`
 }
 
 type Response struct {
 	StatusCode int               `json:"statusCode"`
 	Headers    map[string]string `json:"headers"`
 	Body       string            `json:"body"`
+}
+
+type ResponseValidation struct {
+	ExpectedStatusCode int               `json:"expectedStatusCode,omitempty"`
+	ExpectedHeaders    map[string]string `json:"expectedHeaders,omitempty"`
+	JSONSchema         string            `json:"jsonSchema,omitempty"`
+	CustomAssertions   []string          `json:"customAssertions,omitempty"`
 }
 
 type Collection struct {
@@ -119,10 +128,10 @@ type ExportedCollection struct {
 
 func (c *Collection) Save(path string) error {
 	if err := c.Validate(); err != nil {
-		return errors.NewAppError(http.StatusBadRequest, utils.InvalidCollectionErr, err)
+		return errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidCollection, err)
 	}
 
-	if c.ID == utils.EmptyString {
+	if c.ID == constants.EmptyString {
 		c.ID = uuid.New().String()
 	}
 	data, err := json.Marshal(c)
@@ -144,10 +153,10 @@ func LoadCollection(path string, id string) (*Collection, error) {
 
 func (c *Collection) AddRequest(request Request) error {
 	if err := request.Validate(); err != nil {
-		return errors.NewAppError(http.StatusBadRequest, utils.InvalidRequestErr, err)
+		return errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequest, err)
 	}
 
-	if request.ID == utils.EmptyString {
+	if request.ID == constants.EmptyString {
 		request.ID = uuid.New().String()
 	}
 	c.Requests = append(c.Requests, request)
@@ -223,14 +232,14 @@ func NewCollectionFromImported(imported ImportedCollection) (Collection, error) 
 		}
 
 		if err := newRequest.Validate(); err != nil {
-			return Collection{}, errors.NewAppError(http.StatusBadRequest, utils.InvalidRequestErr, err)
+			return Collection{}, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequestAt, err)
 		}
 
 		newCollection.Requests = append(newCollection.Requests, newRequest)
 	}
 
 	if err := newCollection.Validate(); err != nil {
-		return Collection{}, errors.NewAppError(http.StatusBadRequest, utils.InvalidCollectionErr, err)
+		return Collection{}, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidCollection, err)
 	}
 
 	return newCollection, nil
@@ -260,27 +269,27 @@ func (m Method) IsValid() bool {
 }
 
 func (r *Request) Validate() error {
-	if r.Name == utils.EmptyString {
-		return errors.NewAppError(http.StatusBadRequest, utils.EmptyRequestNameErr, nil)
+	if r.Name == constants.EmptyString {
+		return errors.NewAppError(http.StatusBadRequest, constants.ErrEmptyRequestName, nil)
 	}
 
 	if !r.Method.IsValid() {
-		return errors.NewAppError(http.StatusMethodNotAllowed, fmt.Sprintf(utils.InvalidHTTPMethodErr+": %s", r.Method), nil)
+		return errors.NewAppError(http.StatusMethodNotAllowed, fmt.Sprintf(constants.ErrInvalidHTTPMethod+": %s", r.Method), nil)
 	}
 
 	if _, err := url.Parse(r.URL); err != nil {
-		return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.InvalidURLErr+": %s", r.URL), err)
+		return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrInvalidURL+": %s", r.URL), err)
 	}
 
 	for _, header := range r.Headers {
 		if header.Key == "" {
-			return errors.NewAppError(http.StatusBadRequest, utils.EmptyHeaderKeyErr, nil)
+			return errors.NewAppError(http.StatusBadRequest, constants.ErrEmptyHeaderKey, nil)
 		}
 	}
 
 	if r.Auth != nil {
 		if err := r.Auth.Validate(); err != nil {
-			return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.InvalidAuthErr, r.Auth), err)
+			return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrInvalidAuth, r.Auth), err)
 		}
 	}
 
@@ -293,65 +302,65 @@ func (a *Auth) Validate() error {
 		return nil
 
 	case AuthBasic:
-		if _, ok := a.Params[utils.Username]; !ok {
-			return errors.NewAppError(http.StatusBadRequest, utils.BasicAuthUserErr, nil)
+		if _, ok := a.Params[constants.Username]; !ok {
+			return errors.NewAppError(http.StatusBadRequest, constants.ErrBasicAuthUser, nil)
 		}
-		if _, ok := a.Params[utils.Password]; !ok {
-			return errors.NewAppError(http.StatusBadRequest, utils.BasicAuthPassErr, nil)
+		if _, ok := a.Params[constants.Password]; !ok {
+			return errors.NewAppError(http.StatusBadRequest, constants.ErrBasicAuthPass, nil)
 		}
 
 	case AuthBearer:
-		if _, ok := a.Params[utils.Token]; !ok {
-			return errors.NewAppError(http.StatusBadRequest, utils.BearerAuthErr, nil)
+		if _, ok := a.Params[constants.Token]; !ok {
+			return errors.NewAppError(http.StatusBadRequest, constants.ErrBearerAuth, nil)
 		}
 
 	case AuthAPIKey:
-		if _, ok := a.Params[utils.Key]; !ok {
-			return errors.NewAppError(http.StatusBadRequest, utils.APIKeyErr, nil)
+		if _, ok := a.Params[constants.Key]; !ok {
+			return errors.NewAppError(http.StatusBadRequest, constants.ErrAPIKey, nil)
 		}
-		if _, ok := a.Params[utils.Value]; !ok {
-			return errors.NewAppError(http.StatusBadRequest, utils.APIKeyValueErr, nil)
+		if _, ok := a.Params[constants.Value]; !ok {
+			return errors.NewAppError(http.StatusBadRequest, constants.ErrAPIKeyValue, nil)
 		}
-		if in, ok := a.Params[utils.In]; !ok || (in != utils.Header && in != utils.Query) {
-			return errors.NewAppError(http.StatusBadRequest, utils.APIKeyInErr, nil)
+		if in, ok := a.Params[constants.In]; !ok || (in != constants.Header && in != constants.Query) {
+			return errors.NewAppError(http.StatusBadRequest, constants.ErrAPIKeyIn, nil)
 		}
 
 	case AuthOAuth2:
-		if _, ok := a.Params[utils.AccessToken]; !ok {
-			return errors.NewAppError(http.StatusBadRequest, utils.OAuth2TokenErr, nil)
+		if _, ok := a.Params[constants.AccessToken]; !ok {
+			return errors.NewAppError(http.StatusBadRequest, constants.ErrOAuth2Token, nil)
 		}
 
 	case AuthAWSSigV4:
-		requiredParams := []string{utils.AccessKey, utils.SecretKey, utils.Region, utils.Service}
+		requiredParams := []string{constants.AccessKey, constants.SecretKey, constants.Region, constants.Service}
 		for _, param := range requiredParams {
 			if _, ok := a.Params[param]; !ok {
-				return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.AuthAWSErr, param), nil)
+				return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrAuthAWS, param), nil)
 			}
 		}
 
 	case AuthDigest:
-		requiredParams := []string{utils.Username, utils.Password, utils.Realm, utils.Nonce, utils.Qop, utils.NC, utils.Cnonce}
+		requiredParams := []string{constants.Username, constants.Password, constants.Realm, constants.Nonce, constants.Qop, constants.NC, constants.Cnonce}
 		for _, param := range requiredParams {
 			if _, ok := a.Params[param]; !ok {
-				return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.DigestAuthErr, param), nil)
+				return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrDigestAuth, param), nil)
 			}
 		}
 
 	default:
-		return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(utils.UnsupportedTypeErr, a.Type), nil)
+		return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrUnsupportedType, a.Type), nil)
 	}
 
 	return nil
 }
 
 func (c *Collection) Validate() error {
-	if c.Name == utils.EmptyString {
-		return fmt.Errorf(utils.EmptyCollectionNameErr)
+	if c.Name == constants.EmptyString {
+		return fmt.Errorf(constants.ErrEmptyCollectionName)
 	}
 
 	for i, req := range c.Requests {
 		if err := req.Validate(); err != nil {
-			return fmt.Errorf(utils.InvalidRequestAtErr, i, err)
+			return fmt.Errorf(constants.ErrInvalidRequestAt, i, err)
 		}
 	}
 

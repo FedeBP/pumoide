@@ -2,8 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
-	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,13 +10,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
+	"github.com/FedeBP/pumoide/backend/constants"
 	"github.com/FedeBP/pumoide/backend/errors"
 	"github.com/FedeBP/pumoide/backend/models"
 	"github.com/FedeBP/pumoide/backend/utils"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/signer/v4"
+	"github.com/FedeBP/pumoide/backend/utils/validators"
 	"github.com/oliveagle/jsonpath"
 	"github.com/sirupsen/logrus"
 )
@@ -34,67 +31,68 @@ func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var requests []models.Request
 	err := json.NewDecoder(r.Body).Decode(&requests)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, utils.InvalidRequestBodyErr, err, h.Logger)
+		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidRequestBody, err, h.Logger)
 		return
 	}
 
-	envID := r.URL.Query().Get(utils.Env)
+	envID := r.URL.Query().Get(constants.Env)
 	var env *models.Environment
-	if envID != utils.EmptyString {
+	if envID != constants.EmptyString {
 		env, err = models.LoadEnvironment(h.EnvironmentPath, envID)
 		if err != nil {
-			errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToLoadEnvironmentErr, err, h.Logger)
+			errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToLoadEnvironment, err, h.Logger)
 			return
 		}
 	} else {
 		env = &models.Environment{Variables: make(map[string]string)}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
-
-	results, err := h.ExecuteRequests(ctx, requests, env)
+	results, err := h.ExecuteRequests(requests, env)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToExecuteRequestErr, err, h.Logger)
+		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToExecuteRequest, err, h.Logger)
 		return
 	}
 
-	w.Header().Set(utils.ContentType, utils.AppJson)
+	w.Header().Set(constants.ContentType, constants.AppJson)
 	if err := json.NewEncoder(w).Encode(results); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, utils.FailedToWriteResponseErr, err, h.Logger)
+		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 	}
 }
 
-func (h *RequestHandler) ExecuteRequests(ctx context.Context, requests []models.Request, env *models.Environment) ([]models.RequestResult, error) {
+func (h *RequestHandler) ExecuteRequests(requests []models.Request, env *models.Environment) ([]models.RequestResult, error) {
 	results := make([]models.RequestResult, len(requests))
 	completedRequests := make(map[string]bool)
+	allFailed := true
 
 	for i, req := range requests {
-		select {
-		case <-ctx.Done():
-			return results[:i], ctx.Err()
-		default:
-			for _, depID := range req.DependsOn {
-				if !completedRequests[depID] {
-					return results[:i], fmt.Errorf("dependency %s not completed for request %s", depID, req.ID)
-				}
-			}
-
-			result := h.executeRequest(ctx, req, env, results[:i])
-			results[i] = result
-
-			completedRequests[req.ID] = true
-
-			if result.Error != "" {
-				return results[:i+1], fmt.Errorf("error in request %s: %s", req.ID, result.Error)
+		for _, depID := range req.DependsOn {
+			if !completedRequests[depID] {
+				return results[:i], fmt.Errorf("dependency %s not completed for request %s", depID, req.ID)
 			}
 		}
+
+		result := h.ExecuteRequest(req, env, results[:i])
+		results[i] = result
+
+		completedRequests[req.ID] = true
+
+		if result.Error == "" && len(result.ValidationErrors) == 0 {
+			allFailed = false
+		}
+
+		if result.Error != "" {
+			return results[:i+1], fmt.Errorf("error in request %s: %s", req.ID, result.Error)
+		}
+	}
+
+	if allFailed {
+		return results, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedAllRequests, nil)
 	}
 
 	return results, nil
 }
 
-func (h *RequestHandler) executeRequest(ctx context.Context, req models.Request, env *models.Environment, previousResults []models.RequestResult) models.RequestResult {
+func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.RequestResult {
 	result := models.RequestResult{
 		Request: req,
 	}
@@ -107,35 +105,34 @@ func (h *RequestHandler) executeRequest(ctx context.Context, req models.Request,
 		return result
 	}
 
-	httpReq = httpReq.WithContext(ctx)
-
 	resp, clientErr := h.Client.Do(httpReq)
 	if clientErr != nil {
-		result.Error = fmt.Sprintf("%s: %v", utils.FailedToExecuteRequestErr, clientErr)
+		result.Error = fmt.Sprintf("%s: %v", constants.ErrFailedToExecuteRequest, clientErr)
 		return result
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			result.Error = fmt.Sprintf("%s: %v", utils.FailedToCloseBodyErr, err)
-			return
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			h.Logger.Warnf("%s: %v", constants.ErrFailedToCloseBody, err)
 		}
-	}(resp.Body)
+	}()
 
-	result.Response.StatusCode = resp.StatusCode
-	result.Response.Headers = make(map[string]string)
+	body, clientErr := io.ReadAll(resp.Body)
+	if clientErr != nil {
+		result.Error = fmt.Sprintf("%s: %v", constants.ErrFailedToReadResponse, clientErr)
+		return result
+	}
+
+	result.Response = models.Response{
+		StatusCode: resp.StatusCode,
+		Headers:    make(map[string]string),
+		Body:       string(body),
+	}
+
 	for k, v := range resp.Header {
 		result.Response.Headers[k] = v[0]
 	}
 
-	body, clientErr := io.ReadAll(resp.Body)
-	if clientErr != nil {
-		result.Error = fmt.Sprintf("%s: %v", utils.FailedToReadResponseErr, clientErr)
-	} else {
-		result.Response.Body = string(body)
-	}
-
-	if result.Error == "" && len(req.ExtractVariables) > 0 {
+	if len(req.ExtractVariables) > 0 {
 		for varName, extractPath := range req.ExtractVariables {
 			extractedValue, err := extractValueFromResponse(result.Response, extractPath)
 			if err == nil {
@@ -146,20 +143,31 @@ func (h *RequestHandler) executeRequest(ctx context.Context, req models.Request,
 		}
 	}
 
+	if req.ResponseValidation != nil {
+		validationErrors := validators.ValidateResponse(result.Response, req.ResponseValidation)
+		if len(validationErrors) > 0 {
+			result.ValidationErrors = validationErrors
+		}
+	}
+
 	return result
 }
 
 func (h *RequestHandler) substituteVariables(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.Request {
 	substituteFunc := func(input string) string {
-		for key, value := range env.Variables {
-			input = strings.ReplaceAll(input, "{{"+key+"}}", value)
+		if env != nil && len(env.Variables) > 0 {
+			for key, value := range env.Variables {
+				input = strings.ReplaceAll(input, "{{"+key+"}}", value)
+			}
 		}
 
 		for _, prevResult := range previousResults {
-			for varName, extractPath := range prevResult.Request.ExtractVariables {
-				extractedValue, err := extractValueFromResponse(prevResult.Response, extractPath)
-				if err == nil {
-					input = strings.ReplaceAll(input, "{{"+varName+"}}", extractedValue)
+			if prevResult.Request.ExtractVariables != nil {
+				for varName, extractPath := range prevResult.Request.ExtractVariables {
+					extractedValue, err := extractValueFromResponse(prevResult.Response, extractPath)
+					if err == nil {
+						input = strings.ReplaceAll(input, "{{"+varName+"}}", extractedValue)
+					}
 				}
 			}
 		}
@@ -181,115 +189,37 @@ func (h *RequestHandler) substituteVariables(req models.Request, env *models.Env
 
 func (h *RequestHandler) prepareRequest(req models.Request, env *models.Environment) (*http.Request, *errors.AppError) {
 	if !req.Method.IsValid() {
-		return nil, errors.NewAppError(http.StatusBadRequest, utils.InvalidHTTPMethodErr, nil)
+		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidHTTPMethod, nil)
 	}
 
-	parsedURL, err := url.Parse(substituteVariables(req.URL, env))
+	parsedURL, err := url.Parse(utils.SubstituteVariables(req.URL, env))
 	if err != nil {
-		return nil, errors.NewAppError(http.StatusBadRequest, utils.InvalidURLErr, err)
+		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidURL, err)
 	}
 
 	q := parsedURL.Query()
 	for key, value := range req.QueryParams {
-		q.Add(key, substituteVariables(value, env))
+		q.Add(key, utils.SubstituteVariables(value, env))
 	}
 	parsedURL.RawQuery = q.Encode()
 
-	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(substituteVariables(req.Body, env)))
+	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(utils.SubstituteVariables(req.Body, env)))
 	if err != nil {
-		return nil, errors.NewAppError(http.StatusInternalServerError, utils.FailedToCreateRequestErr, err)
+		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToCreateRequest, err)
 	}
 
 	for _, header := range req.Headers {
-		httpReq.Header.Set(header.Key, substituteVariables(header.Value, env))
+		httpReq.Header.Set(header.Key, utils.SubstituteVariables(header.Value, env))
 	}
 
 	if req.Auth != nil {
-		err = applyAuthentication(httpReq, req.Auth, env)
+		err = validators.ApplyAuthentication(httpReq, req.Auth, env)
 		if err != nil {
-			return nil, errors.NewAppError(http.StatusForbidden, utils.FailedToAuthenticateErr, err)
+			return nil, errors.NewAppError(http.StatusForbidden, constants.ErrFailedToAuthenticate, err)
 		}
 	}
 
 	return httpReq, nil
-}
-
-func applyAuthentication(req *http.Request, auth *models.Auth, env *models.Environment) error {
-	if auth == nil || auth.Type == models.AuthNone {
-		return nil
-	}
-
-	switch auth.Type {
-	case models.AuthBasic:
-		username := substituteVariables(auth.Params[utils.Username], env)
-		password := substituteVariables(auth.Params[utils.Password], env)
-		req.SetBasicAuth(username, password)
-
-	case models.AuthBearer:
-		token := substituteVariables(auth.Params[utils.Token], env)
-		req.Header.Set(utils.Authorization, utils.Bearer+token)
-
-	case models.AuthAPIKey:
-		key := substituteVariables(auth.Params[utils.Key], env)
-		value := substituteVariables(auth.Params[utils.Value], env)
-		if auth.Params[utils.In] == utils.Header {
-			req.Header.Set(key, value)
-		} else if auth.Params[utils.In] == utils.Query {
-			q := req.URL.Query()
-			q.Add(key, value)
-			req.URL.RawQuery = q.Encode()
-		}
-
-	case models.AuthOAuth2:
-		token := substituteVariables(auth.Params[utils.AccessToken], env)
-		req.Header.Set(utils.Authorization, utils.Bearer+token)
-
-	case models.AuthAWSSigV4:
-		accessKey := substituteVariables(auth.Params[utils.AccessKey], env)
-		secretKey := substituteVariables(auth.Params[utils.SecretKey], env)
-		sessionToken := substituteVariables(auth.Params[utils.SessionToken], env)
-		region := substituteVariables(auth.Params[utils.Region], env)
-		service := substituteVariables(auth.Params[utils.Service], env)
-
-		creds := credentials.NewStaticCredentials(accessKey, secretKey, sessionToken)
-		signer := v4.NewSigner(creds)
-
-		_, err := signer.Sign(req, nil, service, region, time.Now())
-		if err != nil {
-			return errors.NewAppError(http.StatusInternalServerError, utils.FailedAwsSigV4Err, err)
-		}
-
-	case models.AuthDigest:
-		username := substituteVariables(auth.Params[utils.Username], env)
-		password := substituteVariables(auth.Params[utils.Password], env)
-		realm := substituteVariables(auth.Params[utils.Realm], env)
-		nonce := substituteVariables(auth.Params[utils.Nonce], env)
-		qop := substituteVariables(auth.Params[utils.Qop], env)
-		nc := substituteVariables(auth.Params[utils.NC], env)
-		cnonce := substituteVariables(auth.Params[utils.Cnonce], env)
-
-		ha1 := md5.Sum([]byte(username + ":" + realm + ":" + password))
-		ha2 := md5.Sum([]byte(req.Method + ":" + req.URL.Path))
-		response := md5.Sum([]byte(fmt.Sprintf("%x:%s:%s:%s:%s:%x", ha1, nonce, nc, cnonce, qop, ha2)))
-
-		auth := fmt.Sprintf(utils.DigestAuth, username, realm, nonce, req.URL.Path, qop, nc, cnonce, response)
-		req.Header.Set(utils.Authorization, auth)
-
-	default:
-		return errors.NewAppError(http.StatusBadRequest, utils.UnknownAuthErr, fmt.Errorf("%s", auth.Type))
-	}
-
-	return nil
-}
-
-func substituteVariables(input string, env *models.Environment) string {
-	if env == nil {
-		return input
-	}
-	for key, value := range env.Variables {
-		input = strings.ReplaceAll(input, "{{"+key+"}}", value)
-	}
-	return input
 }
 
 func extractValueFromResponse(response models.Response, extractPath string) (string, error) {
