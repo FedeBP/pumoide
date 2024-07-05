@@ -36,18 +36,20 @@ func NewAppError(code int, message string, err error) *AppError {
 func RespondWithError(w http.ResponseWriter, statusCode int, message string, err error, logger *logrus.Logger) {
 	appErr := NewAppError(statusCode, message, err)
 
-	logEntry := logger.WithFields(logrus.Fields{
-		"statusCode": statusCode,
-		"message":    message,
-	})
-	if err != nil {
-		logEntry = logEntry.WithError(err)
+	if logger != nil {
+		logEntry := logger.WithFields(logrus.Fields{
+			"statusCode": statusCode,
+			"message":    message,
+		})
+		if err != nil {
+			logEntry = logEntry.WithError(err)
+		}
+		logEntry.Error("Pumoide error")
 	}
-	logEntry.Error("Pumoide error")
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
 	w.WriteHeader(statusCode)
-	err = json.NewEncoder(w).Encode(struct {
+	encodeErr := json.NewEncoder(w).Encode(struct {
 		Code    int    `json:"code"`
 		Message string `json:"message"`
 		Error   string `json:"error,omitempty"`
@@ -56,8 +58,7 @@ func RespondWithError(w http.ResponseWriter, statusCode int, message string, err
 		Message: appErr.Message,
 		Error:   appErr.Error(),
 	})
-	if err != nil {
-		logger.WithError(err).Error(constants.ErrFailedToWriteResponse)
-		return
+	if encodeErr != nil && logger != nil {
+		logger.WithError(encodeErr).Error(constants.ErrFailedToWriteResponse)
 	}
 }
