@@ -28,11 +28,27 @@ type RequestHandler struct {
 }
 
 func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var requests []models.Request
-	err := json.NewDecoder(r.Body).Decode(&requests)
+	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidRequestBody, err, h.Logger)
+		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadRequestBody, err, h.Logger)
 		return
+	}
+	err = r.Body.Close()
+	if err != nil {
+		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToCloseBody, err, h.Logger)
+		return
+	}
+
+	var requests []models.Request
+	err = json.Unmarshal(bodyBytes, &requests)
+	if err != nil {
+		var singleRequest models.Request
+		err = json.Unmarshal(bodyBytes, &singleRequest)
+		if err != nil {
+			errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidRequestBody, err, h.Logger)
+			return
+		}
+		requests = []models.Request{singleRequest}
 	}
 
 	envID := r.URL.Query().Get(constants.Env)
@@ -155,24 +171,17 @@ func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environm
 
 func (h *RequestHandler) substituteVariables(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.Request {
 	substituteFunc := func(input string) string {
-		if env != nil && len(env.Variables) > 0 {
-			for key, value := range env.Variables {
-				input = strings.ReplaceAll(input, "{{"+key+"}}", value)
-			}
-		}
-
 		for _, prevResult := range previousResults {
 			if prevResult.Request.ExtractVariables != nil {
 				for varName, extractPath := range prevResult.Request.ExtractVariables {
 					extractedValue, err := extractValueFromResponse(prevResult.Response, extractPath)
 					if err == nil {
-						input = strings.ReplaceAll(input, "{{"+varName+"}}", extractedValue)
+						env.Variables[varName] = extractedValue
 					}
 				}
 			}
 		}
-
-		return input
+		return utils.SubstituteVariables(input, env)
 	}
 
 	req.URL = substituteFunc(req.URL)
