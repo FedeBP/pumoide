@@ -170,18 +170,31 @@ func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environm
 }
 
 func (h *RequestHandler) substituteVariables(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.Request {
-	substituteFunc := func(input string) string {
-		for _, prevResult := range previousResults {
-			if prevResult.Request.ExtractVariables != nil {
-				for varName, extractPath := range prevResult.Request.ExtractVariables {
-					extractedValue, err := extractValueFromResponse(prevResult.Response, extractPath)
-					if err == nil {
-						env.Variables[varName] = extractedValue
-					}
+	if env == nil {
+		env = &models.Environment{Variables: make(map[string]string)}
+	}
+
+	combinedEnv := &models.Environment{
+		Variables: make(map[string]string),
+	}
+
+	for k, v := range env.Variables {
+		combinedEnv.Variables[k] = v
+	}
+
+	for _, prevResult := range previousResults {
+		if prevResult.Request.ExtractVariables != nil {
+			for varName, extractPath := range prevResult.Request.ExtractVariables {
+				extractedValue, err := extractValueFromResponse(prevResult.Response, extractPath)
+				if err == nil {
+					combinedEnv.Variables[varName] = extractedValue
 				}
 			}
 		}
-		return utils.SubstituteVariables(input, env)
+	}
+
+	substituteFunc := func(input string) string {
+		return utils.SubstituteVariables(input, combinedEnv)
 	}
 
 	req.URL = substituteFunc(req.URL)
