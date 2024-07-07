@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/FedeBP/pumoide/backend/internal/models"
 	"github.com/FedeBP/pumoide/backend/internal/utils"
@@ -25,6 +26,7 @@ type RequestHandler struct {
 	EnvironmentPath string
 	Logger          *logrus.Logger
 	WorkerCount     int
+	HistoryManager  *models.History
 }
 
 func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -109,6 +111,7 @@ func (h *RequestHandler) ExecuteRequests(requests []models.Request, env *models.
 }
 
 func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.RequestResult {
+	startTime := time.Now()
 	result := models.RequestResult{
 		Request: req,
 	}
@@ -163,6 +166,20 @@ func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environm
 		validationErrors := validators.ValidateResponse(result.Response, req.ResponseValidation)
 		if len(validationErrors) > 0 {
 			result.ValidationErrors = validationErrors
+		}
+	}
+
+	executionTime := time.Since(startTime)
+
+	if h.HistoryManager != nil {
+		entry := models.HistoryEntry{
+			Timestamp:     time.Now(),
+			Request:       req,
+			Response:      result.Response,
+			ExecutionTime: executionTime,
+		}
+		if err := h.HistoryManager.AddEntry(entry); err != nil {
+			h.Logger.Warnf(constants.ErrFailedToAddHistory+": %v", err)
 		}
 	}
 

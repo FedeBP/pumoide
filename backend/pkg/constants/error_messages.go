@@ -43,6 +43,12 @@ const (
 	ErrFailedToReadResponse    = "Failed to read response body"
 	ErrFailedAllRequests       = "All requests failed"
 	ErrFailedToReadRequestBody = "Failed to read request body"
+	ErrFailedToDeleteRequest   = "Failed to delete request"
+
+	// History errors
+	ErrFailedToDeleteHistory = "Failed to delete history"
+	ErrFailedToAddHistory    = "Failed to add history entry"
+	ErrFailedToGetHistory    = "Failed to retrieve history entries"
 
 	// Authentication errors
 	ErrInvalidAuth          = "Invalid authentication: %s"

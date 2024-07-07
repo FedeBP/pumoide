@@ -8,25 +8,37 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/FedeBP/pumoide/backend/internal/models"
 	"github.com/FedeBP/pumoide/backend/internal/utils"
 	"github.com/FedeBP/pumoide/backend/pkg/logger"
 	"github.com/sirupsen/logrus"
 )
 
 type Pumoide struct {
-	Config *Config
-	Logger *logrus.Logger
-	Router *http.ServeMux
+	Config         *Config
+	Logger         *logrus.Logger
+	Router         *http.ServeMux
+	HistoryManager *models.History
 }
 
 func NewPumoide() (*Pumoide, error) {
 	config := LoadConfig()
 	lgr := logger.GetLogger(filepath.Join(config.LogFilePath, config.LogFileName), config.LogLevel)
 
+	var historyManager *models.History
+	if config.HistoryEnabled {
+		historyManager = models.NewHistoryManager(
+			utils.GetCurrentStorageLocation(),
+			config.HistoryMaxAge,
+			config.HistoryMaxEntries,
+		)
+	}
+
 	return &Pumoide{
-		Config: config,
-		Logger: lgr,
-		Router: http.NewServeMux(),
+		Config:         config,
+		Logger:         lgr,
+		Router:         http.NewServeMux(),
+		HistoryManager: historyManager,
 	}, nil
 }
 

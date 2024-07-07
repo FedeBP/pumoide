@@ -20,6 +20,9 @@ type Config struct {
 	LogLevel                string
 	ClientTimeout           time.Duration
 	Workers                 int
+	HistoryEnabled          bool
+	HistoryMaxAge           time.Duration
+	HistoryMaxEntries       int
 }
 
 func LoadConfig() *Config {
@@ -32,8 +35,11 @@ func LoadConfig() *Config {
 		LogFilePath:             getEnv("LOG_FILE_PATH", utils.GetDefaultLogsPath()),
 		LogFileName:             getEnv("LOG_FILE_NAME", "pumoide.log"),
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
-		ClientTimeout:           time.Duration(getEnvAsInt("CLIENT_TIMEOUT", 30)) * time.Second,
+		ClientTimeout:           getEnvAsDuration("CLIENT_TIMEOUT", 0*time.Second),
 		Workers:                 getEnvAsInt("WORKERS", 10),
+		HistoryEnabled:          getEnvAsBool("HISTORY_ENABLED", true),
+		HistoryMaxAge:           getEnvAsDuration("HISTORY_MAX_AGE", 30*24*time.Hour),
+		HistoryMaxEntries:       getEnvAsInt("HISTORY_MAX_ENTRIES", 1000),
 	}
 }
 
@@ -56,6 +62,26 @@ func getEnvAsFloat(key string, fallback float64) float64 {
 	strValue := getEnv(key, "")
 	if value, err := strconv.ParseFloat(strValue, 64); err == nil {
 		return value
+	}
+	return fallback
+}
+
+func getEnvAsBool(key string, fallback bool) bool {
+	if value, ok := os.LookupEnv(key); ok {
+		v, err := strconv.ParseBool(value)
+		if err == nil {
+			return v
+		}
+	}
+	return fallback
+}
+
+func getEnvAsDuration(key string, fallback time.Duration) time.Duration {
+	if value, ok := os.LookupEnv(key); ok {
+		v, err := time.ParseDuration(value)
+		if err == nil {
+			return v
+		}
 	}
 	return fallback
 }

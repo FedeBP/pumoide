@@ -21,6 +21,7 @@ func (a *Pumoide) InitRoutes() {
 			EnvironmentPath: a.Config.DefaultEnvironmentsPath,
 			Logger:          a.Logger,
 			WorkerCount:     a.Config.Workers,
+			HistoryManager:  a.HistoryManager,
 		},
 		limiter,
 	))
@@ -34,4 +35,11 @@ func (a *Pumoide) InitRoutes() {
 		&api.MethodHandler{Logger: a.Logger},
 		limiter,
 	))
+
+	if a.HistoryManager != nil {
+		a.Router.Handle("/pumoide-api/history", middleware.RateLimitMiddleware(
+			&api.HistoryHandler{HistoryManager: a.HistoryManager, Logger: a.Logger},
+			limiter,
+		))
+	}
 }

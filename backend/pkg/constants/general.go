@@ -12,6 +12,9 @@ const (
 	ActionUpdateCollection = "updateCollection"
 	ActionDeleteCollection = "deleteCollection"
 	ActionDeleteRequest    = "deleteRequest"
+	ActionEntry            = "getEntry"
+	ActionDeleteEntry      = "deleteEntry"
+	ActionClearHistory     = "clearHistory"
 
 	// ID constants
 	CollectionID = "collectionId"

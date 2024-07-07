@@ -282,7 +282,7 @@ func (r *Request) Validate() error {
 	}
 
 	for _, header := range r.Headers {
-		if header.Key == "" {
+		if header.Key == constants.EmptyString {
 			return errors.NewAppError(http.StatusBadRequest, constants.ErrEmptyHeaderKey, nil)
 		}
 	}
