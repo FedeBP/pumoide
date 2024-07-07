@@ -1,6 +1,7 @@
 package validators
 
 import (
+	"context"
 	"crypto/md5"
 	"fmt"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/signer/v4"
 )
+
+var oauth2Managers = make(map[string]*OAuth2Manager)
 
 func ApplyAuthentication(req *http.Request, auth *models.Auth, env *models.Environment) error {
 	if auth == nil || auth.Type == models.AuthNone {
@@ -41,8 +44,33 @@ func ApplyAuthentication(req *http.Request, auth *models.Auth, env *models.Envir
 		}
 
 	case models.AuthOAuth2:
-		token := utils.SubstituteVariables(auth.Params[constants.AccessToken], env)
-		req.Header.Set(constants.Authorization, constants.Bearer+token)
+		if auth.OAuth2 == nil {
+			return errors.NewAppError(http.StatusBadRequest, "OAuth2 configuration is missing", nil)
+		}
+
+		managerKey := auth.OAuth2.ClientID + auth.OAuth2.TokenURL
+		manager, ok := oauth2Managers[managerKey]
+		if !ok {
+			manager = NewOAuth2Manager(auth.OAuth2)
+			oauth2Managers[managerKey] = manager
+		}
+
+		ctx, cancel := context.WithTimeout(req.Context(), 30*time.Second)
+		defer cancel()
+
+		token, err := manager.GetToken(ctx, auth.OAuth2.GrantType, auth.Params)
+		if err != nil {
+			return errors.NewAppError(http.StatusInternalServerError, constants.ErrOAuth2Token, err)
+		}
+
+		if token.Expiry.Before(time.Now()) {
+			token, err = manager.RefreshToken(ctx)
+			if err != nil {
+				return errors.NewAppError(http.StatusInternalServerError, "Failed to refresh OAuth2 token", err)
+			}
+		}
+
+		req.Header.Set(constants.Authorization, constants.Bearer+token.AccessToken)
 
 	case models.AuthAWSSigV4:
 		accessKey := utils.SubstituteVariables(auth.Params[constants.AccessKey], env)

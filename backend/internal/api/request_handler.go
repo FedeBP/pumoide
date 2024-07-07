@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -30,6 +31,8 @@ type RequestHandler struct {
 	WorkerCount     int
 	HistoryManager  *models.History
 }
+
+var oauth2Managers = make(map[string]*validators.OAuth2Manager)
 
 func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
@@ -123,6 +126,14 @@ func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environm
 	if err != nil {
 		result.Error = err.Error()
 		return result
+	}
+
+	if req.Auth != nil && req.Auth.Type == models.AuthOAuth2 {
+		err = h.refreshOAuth2TokenIfNeeded(httpReq, req.Auth)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
 	}
 
 	var start, connect, dns, tlsHandshake time.Time
@@ -332,4 +343,30 @@ func extractRegexValue(responseBody string, regexPattern string) (string, error)
 	}
 
 	return "", fmt.Errorf("no match found for regex pattern")
+}
+
+func (h *RequestHandler) refreshOAuth2TokenIfNeeded(httpReq *http.Request, authConfig *models.Auth) *errors.AppError {
+	managerKey := authConfig.OAuth2.ClientID + authConfig.OAuth2.TokenURL
+	manager, ok := oauth2Managers[managerKey]
+	if !ok {
+		return errors.NewAppError(http.StatusInternalServerError, "OAuth2 manager not found", nil)
+	}
+
+	ctx, cancel := context.WithTimeout(httpReq.Context(), 30*time.Second)
+	defer cancel()
+
+	token, err := manager.GetToken(ctx, authConfig.OAuth2.GrantType, authConfig.Params)
+	if err != nil {
+		return errors.NewAppError(http.StatusInternalServerError, constants.ErrOAuth2Token, err)
+	}
+
+	if token.Expiry.Before(time.Now()) {
+		token, err = manager.RefreshToken(ctx)
+		if err != nil {
+			return errors.NewAppError(http.StatusInternalServerError, "Failed to refresh OAuth2 token", err)
+		}
+		httpReq.Header.Set(constants.Authorization, constants.Bearer+token.AccessToken)
+	}
+
+	return nil
 }

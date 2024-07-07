@@ -29,6 +29,17 @@ const (
 type Auth struct {
 	Type   AuthType          `json:"type"`
 	Params map[string]string `json:"params"`
+	OAuth2 *OAuth2Config     `json:"oauth2,omitempty"`
+}
+
+type OAuth2Config struct {
+	ClientID     string   `json:"clientId"`
+	ClientSecret string   `json:"clientSecret"`
+	TokenURL     string   `json:"tokenUrl"`
+	AuthURL      string   `json:"authUrl"`
+	RedirectURL  string   `json:"redirectUrl"`
+	Scopes       []string `json:"scopes"`
+	GrantType    string   `json:"grantType"`
 }
 
 type Method string
