@@ -2,10 +2,12 @@ package api
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -111,7 +113,6 @@ func (h *RequestHandler) ExecuteRequests(requests []models.Request, env *models.
 }
 
 func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.RequestResult {
-	startTime := time.Now()
 	result := models.RequestResult{
 		Request: req,
 	}
@@ -124,6 +125,24 @@ func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environm
 		return result
 	}
 
+	var start, connect, dns, tlsHandshake time.Time
+	var serverProcessing time.Duration
+
+	trace := &httptrace.ClientTrace{
+		DNSStart:          func(dsi httptrace.DNSStartInfo) { dns = time.Now() },
+		DNSDone:           func(ddi httptrace.DNSDoneInfo) { result.PerformanceMetrics.DNSLookup = time.Since(dns) },
+		ConnectStart:      func(network, addr string) { connect = time.Now() },
+		ConnectDone:       func(network, addr string, err error) { result.PerformanceMetrics.TCPConnection = time.Since(connect) },
+		TLSHandshakeStart: func() { tlsHandshake = time.Now() },
+		TLSHandshakeDone: func(cs tls.ConnectionState, err error) {
+			result.PerformanceMetrics.TLSHandshake = time.Since(tlsHandshake)
+		},
+		GotFirstResponseByte: func() { serverProcessing = time.Since(start) },
+	}
+
+	httpReq = httpReq.WithContext(httptrace.WithClientTrace(httpReq.Context(), trace))
+
+	startTime := time.Now()
 	resp, clientErr := h.Client.Do(httpReq)
 	if clientErr != nil {
 		result.Error = fmt.Sprintf("%s: %v", constants.ErrFailedToExecuteRequest, clientErr)
@@ -135,11 +154,17 @@ func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environm
 		}
 	}()
 
+	bodyStart := time.Now()
 	body, clientErr := io.ReadAll(resp.Body)
 	if clientErr != nil {
 		result.Error = fmt.Sprintf("%s: %v", constants.ErrFailedToReadResponse, clientErr)
 		return result
 	}
+	bodyEnd := time.Now()
+
+	result.PerformanceMetrics.ServerProcessing = serverProcessing
+	result.PerformanceMetrics.ContentTransfer = bodyEnd.Sub(bodyStart)
+	result.PerformanceMetrics.Total = time.Since(start)
 
 	result.Response = models.Response{
 		StatusCode: resp.StatusCode,

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/FedeBP/pumoide/backend/internal/api"
 	"github.com/FedeBP/pumoide/backend/internal/models"
@@ -37,7 +38,6 @@ func TestRequestHandler_ServeHTTP(t *testing.T) {
 		name           string
 		requests       []models.Request
 		expectedStatus int
-		expectedBody   string
 	}{
 		{
 			name: "Single request",
@@ -48,7 +48,6 @@ func TestRequestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   `[{"request":{"id":"","name":"","method":"GET","url":"http://example.com","headers":null,"queryParams":null,"body":""},"response":{"statusCode":200,"headers":{},"body":""}}]`,
 		},
 		{
 			name: "Multiple requests",
@@ -64,7 +63,6 @@ func TestRequestHandler_ServeHTTP(t *testing.T) {
 				},
 			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   `[{"request":{"id":"","name":"","method":"GET","url":"http://example.com","headers":null,"queryParams":null,"body":""},"response":{"statusCode":200,"headers":{},"body":""}},{"request":{"id":"","name":"","method":"POST","url":"http://example.com/post","headers":null,"queryParams":null,"body":"test body"},"response":{"statusCode":201,"headers":{},"body":""}}]`,
 		},
 	}
 
@@ -82,9 +80,62 @@ func TestRequestHandler_ServeHTTP(t *testing.T) {
 
 			assert.Equal(t, tt.expectedStatus, rr.Code)
 
-			assert.JSONEq(t, tt.expectedBody, rr.Body.String())
+			var results []map[string]interface{}
+			err = json.Unmarshal(rr.Body.Bytes(), &results)
+			require.NoError(t, err)
+
+			assert.Equal(t, len(tt.requests), len(results))
+
+			for i, result := range results {
+				assert.Contains(t, result, "request")
+				assert.Contains(t, result, "response")
+				assert.Contains(t, result, "performance_metrics")
+
+				request := result["request"].(map[string]interface{})
+				assert.Equal(t, string(tt.requests[i].Method), request["method"])
+				assert.Equal(t, tt.requests[i].URL, request["url"])
+
+				response := result["response"].(map[string]interface{})
+				assert.Contains(t, response, "statusCode")
+				assert.Contains(t, response, "headers")
+				assert.Contains(t, response, "body")
+
+				metrics := result["performance_metrics"].(map[string]interface{})
+				assert.Contains(t, metrics, "total")
+				assert.Contains(t, metrics, "dns_lookup")
+				assert.Contains(t, metrics, "tcp_connection")
+				assert.Contains(t, metrics, "tls_handshake")
+				assert.Contains(t, metrics, "server_processing")
+				assert.Contains(t, metrics, "content_transfer")
+			}
 		})
 	}
+}
+
+func TestRequestHandler_ExecuteRequest_Timeout(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(2 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer ts.Close()
+
+	client := &http.Client{
+		Timeout: 1 * time.Second,
+	}
+
+	testLogger := logrus.New()
+	testLogger.SetOutput(&bytes.Buffer{})
+
+	handler := newRequestHandler(client, "test_env_path", testLogger, 5)
+
+	req := models.Request{
+		Method: "GET",
+		URL:    ts.URL,
+	}
+
+	result := handler.ExecuteRequest(req, nil, nil)
+
+	assert.Contains(t, result.Error, "context deadline exceeded")
 }
 
 type mockTransport struct{}

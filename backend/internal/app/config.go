@@ -18,11 +18,21 @@ type Config struct {
 	LogFilePath             string
 	LogFileName             string
 	LogLevel                string
-	ClientTimeout           time.Duration
 	Workers                 int
 	HistoryEnabled          bool
 	HistoryMaxAge           time.Duration
 	HistoryMaxEntries       int
+	ClientTimeout           time.Duration
+	DialTimeout             time.Duration
+	KeepAlive               time.Duration
+	MaxIdleConns            int
+	IdleConnTimeout         time.Duration
+	TLSHandshakeTimeout     time.Duration
+	ExpectContinueTimeout   time.Duration
+	DisableCompression      bool
+	DisableKeepAlives       bool
+	MaxIdleConnsPerHost     int
+	ResponseHeaderTimeout   time.Duration
 }
 
 func LoadConfig() *Config {
@@ -35,11 +45,21 @@ func LoadConfig() *Config {
 		LogFilePath:             getEnv("LOG_FILE_PATH", utils.GetDefaultLogsPath()),
 		LogFileName:             getEnv("LOG_FILE_NAME", "pumoide.log"),
 		LogLevel:                getEnv("LOG_LEVEL", "info"),
-		ClientTimeout:           getEnvAsDuration("CLIENT_TIMEOUT", 0*time.Second),
 		Workers:                 getEnvAsInt("WORKERS", 10),
 		HistoryEnabled:          getEnvAsBool("HISTORY_ENABLED", true),
 		HistoryMaxAge:           getEnvAsDuration("HISTORY_MAX_AGE", 30*24*time.Hour),
 		HistoryMaxEntries:       getEnvAsInt("HISTORY_MAX_ENTRIES", 1000),
+		ClientTimeout:           getEnvAsDuration("CLIENT_TIMEOUT", 0),
+		DialTimeout:             getEnvAsDuration("DIAL_TIMEOUT", 30*time.Second),
+		KeepAlive:               getEnvAsDuration("KEEP_ALIVE", 30*time.Second),
+		MaxIdleConns:            getEnvAsInt("MAX_IDLE_CONNS", 100),
+		IdleConnTimeout:         getEnvAsDuration("IDLE_CONN_TIMEOUT", 90*time.Second),
+		TLSHandshakeTimeout:     getEnvAsDuration("TLS_HANDSHAKE_TIMEOUT", 10*time.Second),
+		ExpectContinueTimeout:   getEnvAsDuration("EXPECT_CONTINUE_TIMEOUT", 1*time.Second),
+		DisableCompression:      getEnvAsBool("DISABLE_COMPRESSION", false),
+		DisableKeepAlives:       getEnvAsBool("DISABLE_KEEP_ALIVES", false),
+		MaxIdleConnsPerHost:     getEnvAsInt("MAX_IDLE_CONNS_PER_HOST", 0),
+		ResponseHeaderTimeout:   getEnvAsDuration("RESPONSE_HEADER_TIMEOUT", 0),
 	}
 }
 

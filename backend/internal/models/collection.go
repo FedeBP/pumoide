@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	"github.com/FedeBP/pumoide/backend/pkg/errors"
@@ -49,6 +50,15 @@ type Header struct {
 	Value string `json:"value"`
 }
 
+type PerformanceMetrics struct {
+	DNSLookup        time.Duration `json:"dns_lookup"`
+	TCPConnection    time.Duration `json:"tcp_connection"`
+	TLSHandshake     time.Duration `json:"tls_handshake"`
+	ServerProcessing time.Duration `json:"server_processing"`
+	ContentTransfer  time.Duration `json:"content_transfer"`
+	Total            time.Duration `json:"total"`
+}
+
 type Request struct {
 	ID                 string              `json:"id"`
 	Name               string              `json:"name"`
@@ -64,10 +74,11 @@ type Request struct {
 }
 
 type RequestResult struct {
-	Request          Request  `json:"request"`
-	Response         Response `json:"response"`
-	Error            string   `json:"error,omitempty"`
-	ValidationErrors []string `json:"validationErrors,omitempty"`
+	Request            Request            `json:"request"`
+	Response           Response           `json:"response"`
+	Error              string             `json:"error,omitempty"`
+	ValidationErrors   []string           `json:"validationErrors,omitempty"`
+	PerformanceMetrics PerformanceMetrics `json:"performance_metrics"`
 }
 
 type Response struct {
