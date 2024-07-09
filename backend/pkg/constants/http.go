@@ -8,4 +8,5 @@ const (
 
 	// Content Types
 	AppJson = "application/json"
+	WwwForm = "application/x-www-form-urlencoded"
 )

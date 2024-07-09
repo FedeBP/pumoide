@@ -1,9 +1,9 @@
 package app
 
 import (
-	"github.com/FedeBP/pumoide/backend/internal/api"
 	"net/http"
 
+	"github.com/FedeBP/pumoide/backend/internal/api"
 	"github.com/FedeBP/pumoide/backend/internal/middleware"
 	"github.com/FedeBP/pumoide/backend/internal/services"
 )

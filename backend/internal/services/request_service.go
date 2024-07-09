@@ -45,7 +45,7 @@ func (s *RequestService) ExecuteRequests(requests []domain.Request, envID string
 			go func(r domain.Request) {
 				defer wg.Done()
 
-				s.preprocessRequest(r, env)
+				s.PreprocessRequest(r, env)
 
 				startTime := time.Now()
 				response, err := r.Execute(env)
@@ -62,7 +62,7 @@ func (s *RequestService) ExecuteRequests(requests []domain.Request, envID string
 				if err != nil {
 					result.Error = err.Error()
 				} else {
-					s.postprocessRequest(r, response, env)
+					s.PostprocessRequest(r, response, env)
 				}
 
 				mu.Lock()
@@ -123,11 +123,11 @@ func (s *RequestService) findRequestIndex(requests []domain.Request, id string) 
 	return -1
 }
 
-func (s *RequestService) preprocessRequest(req domain.Request, env *domain.Environment) {
+func (s *RequestService) PreprocessRequest(req domain.Request, env *domain.Environment) {
 	utils.SubstituteRequestVariables(req, env)
 }
 
-func (s *RequestService) postprocessRequest(req domain.Request, resp domain.Response, env *domain.Environment) {
+func (s *RequestService) PostprocessRequest(req domain.Request, resp domain.Response, env *domain.Environment) {
 	for varName, extractPath := range req.GetExtractVariables() {
 		extractedValue, err := utils.ExtractValueFromResponse(resp, extractPath)
 		if err == nil {

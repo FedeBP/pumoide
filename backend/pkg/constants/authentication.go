@@ -4,6 +4,8 @@ const (
 	// Auth parameters
 	Username     = "username"
 	Password     = "password"
+	AuthCode     = "authorization_code"
+	ClientCreds  = "client_credentials"
 	Bearer       = "Bearer "
 	Token        = "token"
 	Header       = "header"

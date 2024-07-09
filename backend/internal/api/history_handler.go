@@ -75,7 +75,7 @@ func (h *HistoryHandler) getEntries(w http.ResponseWriter, r *http.Request) {
 func (h *HistoryHandler) getEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(constants.ID)
 	if id == "" {
-		customErrors.RespondWithError(w, http.StatusBadRequest, "Missing history entry ID", nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrMissingHistoryEntryID, nil, h.Logger)
 		return
 	}
 
@@ -100,7 +100,7 @@ func (h *HistoryHandler) getEntry(w http.ResponseWriter, r *http.Request) {
 func (h *HistoryHandler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(constants.ID)
 	if id == "" {
-		customErrors.RespondWithError(w, http.StatusBadRequest, "Missing history entry ID", nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrMissingHistoryEntryID, nil, h.Logger)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (h *HistoryHandler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &appErr) {
 			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
 		} else {
-			customErrors.RespondWithError(w, http.StatusInternalServerError, "Failed to delete history entry", err, h.Logger)
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToDeleteHistory, err, h.Logger)
 		}
 		return
 	}

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,9 +44,22 @@ func (s *EnvironmentService) GetEnvironments() ([]domain.Environment, error) {
 	return environments, nil
 }
 
-func (s *EnvironmentService) CreateEnvironment(environment *domain.Environment) error {
-	environment.ID = uuid.New().String()
-	return environment.Save(s.DefaultPath)
+func (s *EnvironmentService) CreateEnvironment(env *domain.Environment) error {
+	existingEnvs, err := s.GetEnvironments()
+	if err != nil {
+		return err
+	}
+	for _, existingEnv := range existingEnvs {
+		if existingEnv.Name == env.Name {
+			return fmt.Errorf("environment with name '%s' already exists", env.Name)
+		}
+	}
+
+	if env.ID == constants.EmptyString {
+		env.ID = uuid.New().String()
+	}
+
+	return env.Save(s.DefaultPath)
 }
 
 func (s *EnvironmentService) UpdateEnvironment(id string, updatedEnvironment *domain.Environment) error {

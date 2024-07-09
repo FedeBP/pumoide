@@ -3,8 +3,8 @@ package domain
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/FedeBP/pumoide/backend/pkg/validators"
 
+	"github.com/FedeBP/pumoide/backend/pkg/validators"
 	"github.com/xeipuuv/gojsonschema"
 )
 

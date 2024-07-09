@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	"golang.org/x/oauth2"
 )
 
@@ -71,11 +72,11 @@ func (m *OAuth2Manager) GetToken(ctx context.Context, grantType string, params m
 
 	var err error
 	switch grantType {
-	case "authorization_code":
+	case constants.AuthCode:
 		m.Token, err = m.handleAuthorizationCodeGrant(ctx, params)
-	case "client_credentials":
+	case constants.ClientCreds:
 		m.Token, err = m.handleClientCredentialsGrant(ctx)
-	case "password":
+	case constants.Password:
 		m.Token, err = m.handlePasswordGrant(ctx, params)
 	default:
 		return nil, fmt.Errorf("unsupported grant type: %s", grantType)
@@ -104,7 +105,7 @@ func (m *OAuth2Manager) RefreshToken(ctx context.Context) (*oauth2.Token, error)
 		return nil, fmt.Errorf("failed to create refresh token request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(constants.ContentType, constants.WwwForm)
 
 	resp, err := m.client.Do(req)
 	if err != nil {
@@ -161,7 +162,7 @@ func (m *OAuth2Manager) handleAuthorizationCodeGrant(ctx context.Context, params
 
 func (m *OAuth2Manager) handleClientCredentialsGrant(ctx context.Context) (*oauth2.Token, error) {
 	form := url.Values{}
-	form.Set("grant_type", "client_credentials")
+	form.Set("grant_type", constants.ClientCreds)
 	form.Set("client_id", m.config.ClientID)
 	form.Set("client_secret", m.config.ClientSecret)
 
@@ -173,20 +174,20 @@ func (m *OAuth2Manager) handleClientCredentialsGrant(ctx context.Context) (*oaut
 }
 
 func (m *OAuth2Manager) handlePasswordGrant(ctx context.Context, params map[string]string) (*oauth2.Token, error) {
-	username, ok := params["username"]
+	username, ok := params[constants.Username]
 	if !ok {
 		return nil, fmt.Errorf("username not provided")
 	}
 
-	password, ok := params["password"]
+	password, ok := params[constants.Password]
 	if !ok {
 		return nil, fmt.Errorf("password not provided")
 	}
 
 	form := url.Values{}
-	form.Set("grant_type", "password")
-	form.Set("username", username)
-	form.Set("password", password)
+	form.Set("grant_type", constants.Password)
+	form.Set(constants.Username, username)
+	form.Set(constants.Password, password)
 	form.Set("client_id", m.config.ClientID)
 	form.Set("client_secret", m.config.ClientSecret)
 
@@ -203,7 +204,7 @@ func (m *OAuth2Manager) sendTokenRequest(ctx context.Context, form url.Values) (
 		return nil, fmt.Errorf("failed to create token request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set(constants.ContentType, constants.WwwForm)
 
 	resp, err := m.client.Do(req)
 	if err != nil {

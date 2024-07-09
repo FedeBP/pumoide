@@ -1,8 +1,6 @@
 package domain
 
-import (
-	"time"
-)
+import "time"
 
 type HistoryEntry struct {
 	ID                 string                 `json:"id"`

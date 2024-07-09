@@ -22,8 +22,7 @@ const (
 	ID           = "id"
 
 	// Other constants
-	Path = "path"
-	Env  = "env"
+	Env = "env"
 
 	// Success messages
 	CollectionDeletedSuccess  = "Collection deleted successfully"
