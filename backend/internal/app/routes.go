@@ -1,42 +1,33 @@
 package app
 
 import (
+	"github.com/FedeBP/pumoide/backend/internal/api"
 	"net/http"
 
-	"github.com/FedeBP/pumoide/backend/internal/api"
 	"github.com/FedeBP/pumoide/backend/internal/middleware"
+	"github.com/FedeBP/pumoide/backend/internal/services"
 )
 
 func (a *Pumoide) InitRoutes() {
 	limiter := middleware.NewIPRateLimiter(a.Config.RateLimit, a.Config.RateLimitBurst)
 
-	a.Router.Handle("/pumoide-api/collections", middleware.RateLimitMiddleware(
-		&api.CollectionHandler{DefaultPath: a.Config.DefaultCollectionsPath, Logger: a.Logger},
-		limiter,
-	))
+	collectionService := services.NewCollectionService(a.Config.DefaultCollectionsPath, a.Logger)
+	collectionHandler := api.NewCollectionHandler(collectionService, a.Logger)
+	a.Router.Handle("/pumoide-api/collections", middleware.RateLimitMiddleware(collectionHandler, limiter))
 
-	requestHandler := &api.RequestHandler{
-		Logger:          a.Logger,
-		HistoryManager:  a.HistoryManager,
-		EnvironmentPath: a.Config.DefaultEnvironmentsPath,
-	}
-
+	requestService := services.NewRequestService(a.Logger, a.HistoryManager, a.Config.DefaultEnvironmentsPath)
+	requestHandler := api.NewRequestHandler(requestService, a.Logger)
 	a.Router.Handle("/pumoide-api/execute", middleware.RateLimitMiddleware(http.HandlerFunc(requestHandler.HandleRequest), limiter))
 
-	a.Router.Handle("/pumoide-api/environments", middleware.RateLimitMiddleware(
-		&api.EnvironmentHandler{DefaultPath: a.Config.DefaultEnvironmentsPath, Logger: a.Logger},
-		limiter,
-	))
+	environmentService := services.NewEnvironmentService(a.Config.DefaultEnvironmentsPath, a.Logger)
+	environmentHandler := api.NewEnvironmentHandler(environmentService, a.Logger)
+	a.Router.Handle("/pumoide-api/environments", middleware.RateLimitMiddleware(environmentHandler, limiter))
 
-	a.Router.Handle("/pumoide-api/methods", middleware.RateLimitMiddleware(
-		&api.MethodHandler{Logger: a.Logger},
-		limiter,
-	))
+	methodHandler := api.NewMethodHandler(a.Logger)
+	a.Router.Handle("/pumoide-api/methods", middleware.RateLimitMiddleware(methodHandler, limiter))
 
 	if a.HistoryManager != nil {
-		a.Router.Handle("/pumoide-api/history", middleware.RateLimitMiddleware(
-			&api.HistoryHandler{HistoryManager: a.HistoryManager, Logger: a.Logger},
-			limiter,
-		))
+		historyHandler := api.NewHistoryHandler(a.HistoryManager, a.Logger)
+		a.Router.Handle("/pumoide-api/history", middleware.RateLimitMiddleware(historyHandler, limiter))
 	}
 }

@@ -2,23 +2,27 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 
-	"github.com/FedeBP/pumoide/backend/internal/domain"
-	"github.com/FedeBP/pumoide/backend/internal/models"
-	"github.com/FedeBP/pumoide/backend/internal/utils"
+	"github.com/FedeBP/pumoide/backend/internal/services"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
-	"github.com/FedeBP/pumoide/backend/pkg/errors"
-	"github.com/google/uuid"
+	customErrors "github.com/FedeBP/pumoide/backend/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
 type CollectionHandler struct {
-	DefaultPath string
-	Logger      *logrus.Logger
+	Service *services.CollectionService
+	Logger  *logrus.Logger
+}
+
+func NewCollectionHandler(service *services.CollectionService, logger *logrus.Logger) *CollectionHandler {
+	return &CollectionHandler{
+		Service: service,
+		Logger:  logger,
+	}
 }
 
 func (h *CollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +32,7 @@ func (h *CollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if action == constants.ActionExport {
 			h.exportCollection(w, r)
 		} else {
-			h.getCollections(w, r)
+			h.getCollections(w)
 		}
 	case http.MethodPost:
 		if action == constants.ActionImport {
@@ -43,7 +47,7 @@ func (h *CollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case constants.ActionUpdateCollection:
 			h.updateCollection(w, r)
 		default:
-			errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidAction, nil, h.Logger)
+			customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidAction, nil, h.Logger)
 		}
 	case http.MethodDelete:
 		switch action {
@@ -52,40 +56,20 @@ func (h *CollectionHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case constants.ActionDeleteRequest:
 			h.deleteRequestFromCollection(w, r)
 		default:
-			errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidAction, nil, h.Logger)
+			customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidAction, nil, h.Logger)
 		}
 	default:
-		errors.RespondWithError(w, http.StatusMethodNotAllowed, constants.ErrMethodNotAllowed, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusMethodNotAllowed, constants.ErrMethodNotAllowed, nil, h.Logger)
 	}
-}
-
-func (h *CollectionHandler) getCollectionPath(r *http.Request) string {
-	path := r.URL.Query().Get(constants.Path)
-	if path == constants.EmptyString {
-		return h.DefaultPath
-	}
-	return path
 }
 
 // GET methods
 
-func (h *CollectionHandler) getCollections(w http.ResponseWriter, r *http.Request) {
-	collectionPath := h.getCollectionPath(r)
-
-	files, err := filepath.Glob(filepath.Join(collectionPath, "*.json"))
+func (h *CollectionHandler) getCollections(w http.ResponseWriter) {
+	collections, err := h.Service.GetCollections()
 	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToReadCollection, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToReadCollection, err, h.Logger)
 		return
-	}
-
-	var collections []models.Collection
-	for _, file := range files {
-		collection, err := models.LoadCollection(collectionPath, filepath.Base(file[:len(file)-5]))
-		if err != nil {
-			h.Logger.Printf(constants.ErrFailedToLoadCollection+" %s: %v", file, err)
-			continue
-		}
-		collections = append(collections, *collection)
 	}
 
 	if len(collections) == 0 {
@@ -95,7 +79,7 @@ func (h *CollectionHandler) getCollections(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
 	if err := json.NewEncoder(w).Encode(collections); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 		return
 	}
 }
@@ -103,82 +87,87 @@ func (h *CollectionHandler) getCollections(w http.ResponseWriter, r *http.Reques
 func (h *CollectionHandler) exportCollection(w http.ResponseWriter, r *http.Request) {
 	collectionID := r.URL.Query().Get(constants.ID)
 	if collectionID == constants.EmptyString {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
 		return
 	}
 
-	collection, err := models.LoadCollection(h.getCollectionPath(r), collectionID)
+	exportedCollection, err := h.Service.ExportCollection(collectionID)
 	if err != nil {
-		if os.IsNotExist(err) {
-			w.WriteHeader(http.StatusNoContent)
-			return
+		var appErr *customErrors.AppError
+		if errors.As(err, &appErr) {
+			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
+		} else {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToLoadCollection, err, h.Logger)
 		}
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToLoadCollection, err, h.Logger)
 		return
 	}
-
-	exportedCollection := collection.ToExportedCollection()
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
-	w.Header().Set(constants.ContentDisposition, fmt.Sprintf("attachment; filename=%s.json", collection.Name))
+	w.Header().Set(constants.ContentDisposition, fmt.Sprintf("attachment; filename=%s.json", exportedCollection.Info.Name))
+
 	if err := json.NewEncoder(w).Encode(exportedCollection); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		return
 	}
 }
 
 // POST methods
 
 func (h *CollectionHandler) createCollection(w http.ResponseWriter, r *http.Request) {
-	var collection models.Collection
-	if err := json.NewDecoder(r.Body).Decode(&collection); err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadCollection, err, h.Logger)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadCollection, err, h.Logger)
 		return
 	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToCloseBody, err, h.Logger)
+		}
+	}(r.Body)
 
-	if err := collection.Validate(); err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidCollection, err, h.Logger)
-		return
-	}
-
-	collection.ID = uuid.New().String()
-
-	savePath := h.getCollectionPath(r)
-	if err := utils.EnsureDir(savePath); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToCreateDir, err, h.Logger)
-		return
-	}
-
-	if err := collection.Save(savePath); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveDir, err, h.Logger)
+	collection, err := h.Service.CreateCollection(body)
+	if err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err, h.Logger)
 		return
 	}
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(collection); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 	}
 }
 
 func (h *CollectionHandler) importCollection(w http.ResponseWriter, r *http.Request) {
-	var importedCollection models.ImportedCollection
-	if err := json.NewDecoder(r.Body).Decode(&importedCollection); err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadCollection, err, h.Logger)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadCollection, err, h.Logger)
 		return
 	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToCloseBody, err, h.Logger)
+		}
+	}(r.Body)
 
-	newCollection, _ := models.NewCollectionFromImported(importedCollection)
-
-	collectionPath := h.getCollectionPath(r)
-	if err := newCollection.Save(collectionPath); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err, h.Logger)
+	newCollection, err := h.Service.ImportCollection(body)
+	if err != nil {
+		var appErr *customErrors.AppError
+		if errors.As(err, &appErr) {
+			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
+		} else {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err, h.Logger)
+		}
 		return
 	}
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(newCollection); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		return
 	}
 }
 
@@ -187,113 +176,69 @@ func (h *CollectionHandler) importCollection(w http.ResponseWriter, r *http.Requ
 func (h *CollectionHandler) updateCollection(w http.ResponseWriter, r *http.Request) {
 	collectionID := r.URL.Query().Get(constants.ID)
 	if collectionID == constants.EmptyString {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
 		return
 	}
 
-	var updatedCollection models.Collection
-	if err := json.NewDecoder(r.Body).Decode(&updatedCollection); err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadCollection, err, h.Logger)
-		return
-	}
-
-	for _, req := range updatedCollection.Requests {
-		if err := req.Validate(); err != nil {
-			errors.RespondWithError(w, http.StatusBadRequest, fmt.Sprintf("Invalid request '%s': %v", req.GetName(), err), nil, h.Logger)
-			return
-		}
-	}
-
-	collectionPath := h.getCollectionPath(r)
-
-	existingCollection, err := models.LoadCollection(collectionPath, collectionID)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusNotFound, constants.ErrFailedToLoadCollection, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadCollection, err, h.Logger)
 		return
 	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToCloseBody, err, h.Logger)
+		}
+	}(r.Body)
 
-	existingCollection.Name = updatedCollection.Name
-	existingCollection.Description = updatedCollection.Description
-	existingCollection.Requests = updatedCollection.Requests
-
-	if err := existingCollection.Save(collectionPath); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err, h.Logger)
+	updatedCollection, err := h.Service.UpdateCollection(collectionID, body)
+	if err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err, h.Logger)
 		return
 	}
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(existingCollection); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+	if err := json.NewEncoder(w).Encode(updatedCollection); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 	}
 }
 
 func (h *CollectionHandler) addRequestToCollection(w http.ResponseWriter, r *http.Request) {
 	collectionID := r.URL.Query().Get(constants.ID)
 	if collectionID == constants.EmptyString {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
 		return
 	}
 
-	var rawRequest json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&rawRequest); err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidRequestBody, err, h.Logger)
-		return
-	}
-
-	var baseRequest struct {
-		Type domain.RequestType `json:"type"`
-	}
-	if err := json.Unmarshal(rawRequest, &baseRequest); err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidRequestBody, err, h.Logger)
-		return
-	}
-
-	var newRequest domain.Request
-	switch baseRequest.Type {
-	case "rest":
-		var restRequest models.RESTRequest
-		if err := json.Unmarshal(rawRequest, &restRequest); err != nil {
-			errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidRequestBody, err, h.Logger)
-			return
-		}
-		newRequest = &restRequest
-	case "websocket":
-		var wsRequest models.WebSocketRequest
-		if err := json.Unmarshal(rawRequest, &wsRequest); err != nil {
-			errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidRequestBody, err, h.Logger)
-			return
-		}
-		newRequest = &wsRequest
-	default:
-		errors.RespondWithError(w, http.StatusBadRequest, "Unsupported request type", nil, h.Logger)
-		return
-	}
-
-	newRequest.SetID(uuid.New().String())
-
-	collectionPath := h.getCollectionPath(r)
-
-	collection, err := models.LoadCollection(collectionPath, collectionID)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusNotFound, constants.ErrFailedToLoadCollection, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadRequestBody, err, h.Logger)
 		return
 	}
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToCloseBody, err, h.Logger)
+		}
+	}(r.Body)
 
-	if err := collection.AddRequest(newRequest); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveRequest, err, h.Logger)
-		return
-	}
-
-	if err := collection.Save(collectionPath); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err, h.Logger)
+	newRequest, err := h.Service.AddRequestToCollection(collectionID, body)
+	if err != nil {
+		var appErr *customErrors.AppError
+		if errors.As(err, &appErr) {
+			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
+		} else {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveRequest, err, h.Logger)
+		}
 		return
 	}
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(newRequest); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToEncodeRequest, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToEncodeRequest, err, h.Logger)
 	}
 }
 
@@ -302,26 +247,18 @@ func (h *CollectionHandler) addRequestToCollection(w http.ResponseWriter, r *htt
 func (h *CollectionHandler) deleteCollection(w http.ResponseWriter, r *http.Request) {
 	collectionID := r.URL.Query().Get(constants.ID)
 	if collectionID == constants.EmptyString {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
 		return
 	}
 
-	collectionPath := h.getCollectionPath(r)
-	filePath := filepath.Join(collectionPath, collectionID+".json")
-
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		errors.RespondWithError(w, http.StatusNotFound, constants.ErrCollectionNotFound, err, h.Logger)
-		return
-	}
-
-	if err := os.Remove(filePath); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToDeleteCollection, err, h.Logger)
+	if err := h.Service.DeleteCollection(collectionID); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToDeleteCollection, err, h.Logger)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 	if _, err := w.Write([]byte(constants.CollectionDeletedSuccess)); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 	}
 }
 
@@ -329,30 +266,17 @@ func (h *CollectionHandler) deleteRequestFromCollection(w http.ResponseWriter, r
 	collectionID := r.URL.Query().Get(constants.CollectionID)
 	requestID := r.URL.Query().Get(constants.RequestID)
 	if collectionID == constants.EmptyString || requestID == constants.EmptyString {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrCollectionIDRequired, nil, h.Logger)
 		return
 	}
 
-	collectionPath := h.getCollectionPath(r)
-
-	collection, err := models.LoadCollection(collectionPath, collectionID)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusNotFound, constants.ErrFailedToLoadCollection, err, h.Logger)
-		return
-	}
-
-	if !collection.RemoveRequest(requestID) {
-		errors.RespondWithError(w, http.StatusNotFound, constants.ErrRequestNotFound, err, h.Logger)
-		return
-	}
-
-	if err := collection.Save(collectionPath); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err, h.Logger)
+	if err := h.Service.DeleteRequestFromCollection(collectionID, requestID); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToDeleteRequest, err, h.Logger)
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 	if _, err := w.Write([]byte(constants.RequestDeletedSuccess)); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 	}
 }

@@ -16,7 +16,7 @@ const (
 	AccessKey    = "access_key"
 	SecretKey    = "secret_key"
 	Region       = "region"
-	Service      = "service"
+	Service      = "services"
 	Realm        = "realm"
 	Nonce        = "nonce"
 	Qop          = "qop"

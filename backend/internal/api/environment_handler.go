@@ -2,20 +2,26 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/FedeBP/pumoide/backend/internal/domain"
+	"github.com/FedeBP/pumoide/backend/internal/services"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
-	"github.com/FedeBP/pumoide/backend/pkg/errors"
-	"github.com/google/uuid"
+	customErrors "github.com/FedeBP/pumoide/backend/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
 type EnvironmentHandler struct {
-	DefaultPath string
-	Logger      *logrus.Logger
+	Service *services.EnvironmentService
+	Logger  *logrus.Logger
+}
+
+func NewEnvironmentHandler(service *services.EnvironmentService, logger *logrus.Logger) *EnvironmentHandler {
+	return &EnvironmentHandler{
+		Service: service,
+		Logger:  logger,
+	}
 }
 
 func (h *EnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -29,25 +35,15 @@ func (h *EnvironmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case http.MethodDelete:
 		h.deleteEnvironment(w, r)
 	default:
-		errors.RespondWithError(w, http.StatusMethodNotAllowed, constants.ErrMethodNotAllowed, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusMethodNotAllowed, constants.ErrMethodNotAllowed, nil, h.Logger)
 	}
 }
 
 func (h *EnvironmentHandler) getEnvironments(w http.ResponseWriter) {
-	files, err := filepath.Glob(filepath.Join(h.DefaultPath, "*.json"))
+	environments, err := h.Service.GetEnvironments()
 	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToReadEnvironment, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToReadEnvironment, err, h.Logger)
 		return
-	}
-
-	var environments []domain.Environment
-	for _, file := range files {
-		environment, err := domain.LoadEnvironment(h.DefaultPath, filepath.Base(file[:len(file)-5]))
-		if err != nil {
-			h.Logger.Printf(constants.ErrFailedToLoadEnvironment+" %s: %v", file, err)
-			continue
-		}
-		environments = append(environments, *environment)
 	}
 
 	if len(environments) == 0 {
@@ -57,31 +53,27 @@ func (h *EnvironmentHandler) getEnvironments(w http.ResponseWriter) {
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
 	if err := json.NewEncoder(w).Encode(environments); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 		return
 	}
 }
 
 func (h *EnvironmentHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
 	var environment domain.Environment
-	err := json.NewDecoder(r.Body).Decode(&environment)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadEnvironment, err, h.Logger)
+	if err := json.NewDecoder(r.Body).Decode(&environment); err != nil {
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadEnvironment, err, h.Logger)
 		return
 	}
 
-	environment.ID = uuid.New().String()
-	err = environment.Save(h.DefaultPath)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveEnvironment, err, h.Logger)
+	if err := h.Service.CreateEnvironment(&environment); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveEnvironment, err, h.Logger)
 		return
 	}
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
 	w.WriteHeader(http.StatusCreated)
-	err = json.NewEncoder(w).Encode(environment)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+	if err := json.NewEncoder(w).Encode(environment); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 		return
 	}
 }
@@ -89,36 +81,30 @@ func (h *EnvironmentHandler) createEnvironment(w http.ResponseWriter, r *http.Re
 func (h *EnvironmentHandler) updateEnvironment(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(constants.ID)
 	if id == constants.EmptyString {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrEnvironmentIDRequired, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrEnvironmentIDRequired, nil, h.Logger)
 		return
 	}
 
 	var updatedEnvironment domain.Environment
-	err := json.NewDecoder(r.Body).Decode(&updatedEnvironment)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadEnvironment, err, h.Logger)
+	if err := json.NewDecoder(r.Body).Decode(&updatedEnvironment); err != nil {
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadEnvironment, err, h.Logger)
 		return
 	}
 
-	existingEnvironment, err := domain.LoadEnvironment(h.DefaultPath, id)
+	err := h.Service.UpdateEnvironment(id, &updatedEnvironment)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusNotFound, constants.ErrEnvironmentNotFound, err, h.Logger)
-		return
-	}
-
-	existingEnvironment.Name = updatedEnvironment.Name
-	existingEnvironment.Variables = updatedEnvironment.Variables
-
-	err = existingEnvironment.Save(h.DefaultPath)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveEnvironment, err, h.Logger)
+		var appErr *customErrors.AppError
+		if errors.As(err, &appErr) {
+			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
+		} else {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveEnvironment, err, h.Logger)
+		}
 		return
 	}
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
-	err = json.NewEncoder(w).Encode(existingEnvironment)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+	if err := json.NewEncoder(w).Encode(updatedEnvironment); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 		return
 	}
 }
@@ -126,24 +112,23 @@ func (h *EnvironmentHandler) updateEnvironment(w http.ResponseWriter, r *http.Re
 func (h *EnvironmentHandler) deleteEnvironment(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(constants.ID)
 	if id == constants.EmptyString {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrEnvironmentIDRequired, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrEnvironmentIDRequired, nil, h.Logger)
 		return
 	}
 
-	filePath := filepath.Join(h.DefaultPath, id+".json")
-	err := os.Remove(filePath)
+	err := h.Service.DeleteEnvironment(id)
 	if err != nil {
-		if os.IsNotExist(err) {
-			errors.RespondWithError(w, http.StatusNotFound, constants.ErrEnvironmentNotFound, err, h.Logger)
+		var appErr *customErrors.AppError
+		if errors.As(err, &appErr) {
+			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
 		} else {
-			errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToDeleteEnvironment, err, h.Logger)
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToDeleteEnvironment, err, h.Logger)
 		}
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-	_, err = w.Write([]byte(constants.EnvironmentDeletedSuccess))
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+	if _, err := w.Write([]byte(constants.EnvironmentDeletedSuccess)); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 	}
 }

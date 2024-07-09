@@ -149,8 +149,8 @@ func (c *Collection) ToExportedCollection() ExportedCollection {
 	return exported
 }
 
-func NewCollectionFromImported(imported ImportedCollection) (Collection, error) {
-	newCollection := Collection{
+func NewCollectionFromImported(imported ImportedCollection) (*Collection, error) {
+	newCollection := &Collection{
 		ID:          uuid.New().String(),
 		Name:        imported.Info.Name,
 		Description: imported.Info.Description,
@@ -168,10 +168,7 @@ func NewCollectionFromImported(imported ImportedCollection) (Collection, error) 
 				Message:     item.Request.Body.Raw,
 			}
 			for _, header := range item.Request.Header {
-				if wsReq.Headers == nil {
-					wsReq.Headers = make([]domain.Header, 0)
-				}
-				wsReq.Headers = append(item.Request.Header, domain.Header{Key: header.Key, Value: header.Value})
+				wsReq.Headers = append(wsReq.Headers, domain.Header{Key: header.Key, Value: header.Value})
 			}
 			newRequest = wsReq
 		} else {
@@ -189,14 +186,14 @@ func NewCollectionFromImported(imported ImportedCollection) (Collection, error) 
 		}
 
 		if err := newRequest.Validate(); err != nil {
-			return Collection{}, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequestAt, err)
+			return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequestAt, err)
 		}
 
 		newCollection.Requests = append(newCollection.Requests, newRequest)
 	}
 
 	if err := newCollection.Validate(); err != nil {
-		return Collection{}, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidCollection, err)
+		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidCollection, err)
 	}
 
 	return newCollection, nil
@@ -211,6 +208,48 @@ func (c *Collection) Validate() error {
 		if err := req.Validate(); err != nil {
 			return fmt.Errorf(constants.ErrInvalidRequestAt, i, err)
 		}
+	}
+
+	return nil
+}
+
+func (c *Collection) UnmarshalJSON(data []byte) error {
+	type Alias Collection
+	aux := &struct {
+		Requests []json.RawMessage `json:"requests"`
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	c.Requests = make([]domain.Request, len(aux.Requests))
+	for i, raw := range aux.Requests {
+		var requestType struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(raw, &requestType); err != nil {
+			return err
+		}
+
+		var request domain.Request
+		switch requestType.Type {
+		case "rest":
+			request = &RESTRequest{}
+		case "websocket":
+			request = &WebSocketRequest{}
+		default:
+			return fmt.Errorf("unknown request type: %s", requestType.Type)
+		}
+
+		if err := json.Unmarshal(raw, request); err != nil {
+			return err
+		}
+
+		c.Requests[i] = request
 	}
 
 	return nil

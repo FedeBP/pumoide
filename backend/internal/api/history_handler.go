@@ -2,20 +2,26 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/FedeBP/pumoide/backend/internal/models"
-	"github.com/FedeBP/pumoide/backend/internal/utils"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
-	"github.com/FedeBP/pumoide/backend/pkg/errors"
+	customErrors "github.com/FedeBP/pumoide/backend/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
 
 type HistoryHandler struct {
-	HistoryManager *models.History
-	Logger         *logrus.Logger
+	Service *models.History
+	Logger  *logrus.Logger
+}
+
+func NewHistoryHandler(service *models.History, logger *logrus.Logger) *HistoryHandler {
+	return &HistoryHandler{
+		Service: service,
+		Logger:  logger,
+	}
 }
 
 func (h *HistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -36,34 +42,32 @@ func (h *HistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case constants.ActionDeleteEntry:
 			h.deleteEntry(w, r)
 		default:
-			errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidAction, nil, h.Logger)
+			customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidAction, nil, h.Logger)
 		}
 	default:
-		errors.RespondWithError(w, http.StatusMethodNotAllowed, constants.ErrMethodNotAllowed, nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusMethodNotAllowed, constants.ErrMethodNotAllowed, nil, h.Logger)
 	}
 }
 
 func (h *HistoryHandler) getEntries(w http.ResponseWriter, r *http.Request) {
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	pageSize, _ := strconv.Atoi(r.URL.Query().Get("pageSize"))
-
-	if page < 1 {
+	page, err := strconv.Atoi(r.URL.Query().Get("page"))
+	if err != nil || page < 1 {
 		page = 1
 	}
-	if pageSize < 1 || pageSize > 100 {
+	pageSize, err := strconv.Atoi(r.URL.Query().Get("pageSize"))
+	if err != nil || pageSize < 1 || pageSize > 100 {
 		pageSize = 20
 	}
 
-	entries, err := h.HistoryManager.GetEntries(page, pageSize)
+	entries, err := h.Service.GetEntries(page, pageSize)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToGetHistory, err, h.Logger)
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToGetHistory, err, h.Logger)
 		return
 	}
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
-	err = json.NewEncoder(w).Encode(entries)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+	if err := json.NewEncoder(w).Encode(entries); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 		return
 	}
 }
@@ -71,25 +75,24 @@ func (h *HistoryHandler) getEntries(w http.ResponseWriter, r *http.Request) {
 func (h *HistoryHandler) getEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(constants.ID)
 	if id == "" {
-		errors.RespondWithError(w, http.StatusBadRequest, "Missing history entry ID", nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, "Missing history entry ID", nil, h.Logger)
 		return
 	}
 
-	if err := utils.EnsureDir(h.HistoryManager.GetBasePath()); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, "Failed to create history directory", err, h.Logger)
-		return
-	}
-
-	entry, err := h.HistoryManager.GetEntry(id)
+	entry, err := h.Service.GetEntry(id)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusNotFound, "History entry not found", err, h.Logger)
+		var appErr *customErrors.AppError
+		if errors.As(err, &appErr) {
+			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
+		} else {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToReadResponse, err, h.Logger)
+		}
 		return
 	}
 
 	w.Header().Set(constants.ContentType, constants.AppJson)
-	err = json.NewEncoder(w).Encode(entry)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
+	if err := json.NewEncoder(w).Encode(entry); err != nil {
+		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
 		return
 	}
 }
@@ -97,13 +100,18 @@ func (h *HistoryHandler) getEntry(w http.ResponseWriter, r *http.Request) {
 func (h *HistoryHandler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get(constants.ID)
 	if id == "" {
-		errors.RespondWithError(w, http.StatusBadRequest, "Missing history entry ID", nil, h.Logger)
+		customErrors.RespondWithError(w, http.StatusBadRequest, "Missing history entry ID", nil, h.Logger)
 		return
 	}
 
-	err := h.HistoryManager.DeleteEntry(id)
+	err := h.Service.DeleteEntry(id)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, "Failed to delete history entry", err, h.Logger)
+		var appErr *customErrors.AppError
+		if errors.As(err, &appErr) {
+			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
+		} else {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, "Failed to delete history entry", err, h.Logger)
+		}
 		return
 	}
 
@@ -111,17 +119,14 @@ func (h *HistoryHandler) deleteEntry(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *HistoryHandler) clearHistory(w http.ResponseWriter) {
-	h.HistoryManager.GetMutex().Lock()
-	defer h.HistoryManager.GetMutex().Unlock()
-
-	if err := os.RemoveAll(h.HistoryManager.GetBasePath()); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToDeleteHistory, err, h.Logger)
-		return
-	}
-
-	err := utils.EnsureDir(h.HistoryManager.GetBasePath())
+	err := h.Service.ClearHistory()
 	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, "Failed to clear history", err, h.Logger)
+		var appErr *customErrors.AppError
+		if errors.As(err, &appErr) {
+			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
+		} else {
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToDeleteHistory, err, h.Logger)
+		}
 		return
 	}
 

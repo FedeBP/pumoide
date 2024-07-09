@@ -97,6 +97,10 @@ func (hm *History) GetEntries(page, pageSize int) ([]domain.HistoryEntry, error)
 			continue
 		}
 
+		if executionTimeStr, ok := entry.Request["executionTime"].(string); ok {
+			entry.ExecutionTime, _ = time.ParseDuration(executionTimeStr)
+		}
+
 		entries = append(entries, entry)
 	}
 
@@ -172,6 +176,20 @@ func (hm *History) cleanup() {
 			}
 		}
 	}
+}
+
+func (hm *History) ClearHistory() error {
+	err := os.RemoveAll(hm.basePath)
+	if err != nil {
+		return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToDeleteHistory, err)
+	}
+
+	err = os.MkdirAll(hm.basePath, os.ModePerm)
+	if err != nil {
+		return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToCreateDir, err)
+	}
+
+	return nil
 }
 
 func (hm *History) GetMutex() *sync.RWMutex {
