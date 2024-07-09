@@ -1,4 +1,4 @@
-package validators
+package domain
 
 import (
 	"context"
@@ -10,21 +10,58 @@ import (
 	"strings"
 	"time"
 
-	"github.com/FedeBP/pumoide/backend/internal/models"
 	"golang.org/x/oauth2"
 )
 
 type OAuth2Manager struct {
-	config *models.OAuth2Config
+	config *OAuth2Config
 	Token  *oauth2.Token
 	client *http.Client
 }
 
-func NewOAuth2Manager(config *models.OAuth2Config) *OAuth2Manager {
+func NewOAuth2Manager(config *OAuth2Config) *OAuth2Manager {
 	return &OAuth2Manager{
 		config: config,
 		client: &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+func RefreshOAuth2TokenIfNeeded(req *http.Request, auth *Auth) error {
+	if auth.OAuth2 == nil || auth.OAuth2.AccessToken == "" {
+		return nil
+	}
+
+	token := &oauth2.Token{
+		AccessToken:  auth.OAuth2.AccessToken,
+		RefreshToken: auth.OAuth2.RefreshToken,
+		TokenType:    "Bearer",
+		Expiry:       time.Now().Add(time.Hour),
+	}
+
+	if token.Expiry.Before(time.Now()) {
+		config := &oauth2.Config{
+			ClientID:     auth.OAuth2.ClientID,
+			ClientSecret: auth.OAuth2.ClientSecret,
+			Endpoint: oauth2.Endpoint{
+				TokenURL: auth.OAuth2.TokenURL,
+				AuthURL:  auth.OAuth2.AuthURL,
+			},
+			RedirectURL: auth.OAuth2.RedirectURL,
+			Scopes:      auth.OAuth2.Scopes,
+		}
+
+		newToken, err := config.TokenSource(req.Context(), token).Token()
+		if err != nil {
+			return err
+		}
+
+		auth.OAuth2.AccessToken = newToken.AccessToken
+		auth.OAuth2.RefreshToken = newToken.RefreshToken
+
+		req.Header.Set("Authorization", "Bearer "+newToken.AccessToken)
+	}
+
+	return nil
 }
 
 func (m *OAuth2Manager) GetToken(ctx context.Context, grantType string, params map[string]string) (*oauth2.Token, error) {

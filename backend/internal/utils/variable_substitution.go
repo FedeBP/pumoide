@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/FedeBP/pumoide/backend/internal/models"
+	"github.com/FedeBP/pumoide/backend/internal/domain"
 	"github.com/google/uuid"
 )
 
@@ -22,9 +22,27 @@ var (
 	functionRegex = regexp.MustCompile(`\$([a-zA-Z0-9]+)(?:\((.*?)\))?`)
 )
 
-func SubstituteVariables(input string, env *models.Environment) string {
+func SubstituteRequestVariables(req domain.Request, env *domain.Environment) {
+	req.SetURL(SubstituteVariables(req.GetURL(), env))
+
+	headers := req.GetHeaders()
+	for i, header := range headers {
+		headers[i].Value = SubstituteVariables(header.Value, env)
+	}
+	req.SetHeaders(headers)
+
+	queryParams := req.GetQueryParams()
+	for key, value := range queryParams {
+		queryParams[key] = SubstituteVariables(value, env)
+	}
+	req.SetQueryParams(queryParams)
+
+	req.SetBodyOrMessage(SubstituteVariables(req.GetBodyOrMessage(), env))
+}
+
+func SubstituteVariables(input string, env *domain.Environment) string {
 	if env == nil {
-		env = &models.Environment{Variables: make(map[string]string)}
+		env = &domain.Environment{Variables: make(map[string]string)}
 	}
 
 	result := variableRegex.ReplaceAllStringFunc(input, func(match string) string {
@@ -45,7 +63,7 @@ func SubstituteVariables(input string, env *models.Environment) string {
 	return result
 }
 
-func handleFunctionExpansion(function string, env *models.Environment) string {
+func handleFunctionExpansion(function string, env *domain.Environment) string {
 
 	parts := functionRegex.FindStringSubmatch(function)
 	if len(parts) < 2 {
@@ -94,7 +112,7 @@ func handleFunctionExpansion(function string, env *models.Environment) string {
 	}
 }
 
-func generateRandomInt(args []string, env *models.Environment) string {
+func generateRandomInt(args []string, env *domain.Environment) string {
 	minimum, maximum := 0, 100
 	var err error
 	if len(args) >= 2 {
@@ -113,7 +131,7 @@ func generateRandomInt(args []string, env *models.Environment) string {
 	return fmt.Sprintf("%d", rand.Intn(maximum-minimum+1)+minimum)
 }
 
-func generateRandomFloat(args []string, env *models.Environment) string {
+func generateRandomFloat(args []string, env *domain.Environment) string {
 	minimum, maximum := 0.0, 1.0
 	var err error
 	if len(args) >= 2 {
@@ -132,7 +150,7 @@ func generateRandomFloat(args []string, env *models.Environment) string {
 	return fmt.Sprintf("%.6f", minimum+rand.Float64()*(maximum-minimum))
 }
 
-func generateRandomString(args []string, env *models.Environment) string {
+func generateRandomString(args []string, env *domain.Environment) string {
 	length := 10
 	charset := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	var err error
@@ -152,7 +170,7 @@ func generateRandomString(args []string, env *models.Environment) string {
 	return string(result)
 }
 
-func generateTimestamp(args []string, env *models.Environment) string {
+func generateTimestamp(args []string, env *domain.Environment) string {
 	format := "2006-01-02T15:04:05Z07:00"
 	if len(args) > 0 {
 		format = getEnvOrArg(args[0], env)
@@ -164,7 +182,7 @@ func generateUUID() string {
 	return uuid.New().String()
 }
 
-func handleBase64(args []string, env *models.Environment) string {
+func handleBase64(args []string, env *domain.Environment) string {
 	if len(args) == 0 {
 		return "Error: No input provided for base64"
 	}
@@ -179,7 +197,7 @@ func handleBase64(args []string, env *models.Environment) string {
 	return base64.StdEncoding.EncodeToString([]byte(input))
 }
 
-func generateMD5(args []string, env *models.Environment) string {
+func generateMD5(args []string, env *domain.Environment) string {
 	if len(args) == 0 {
 		return "Error: No input provided for MD5"
 	}
@@ -188,7 +206,7 @@ func generateMD5(args []string, env *models.Environment) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func generateSHA1(args []string, env *models.Environment) string {
+func generateSHA1(args []string, env *domain.Environment) string {
 	if len(args) == 0 {
 		return "Error: No input provided for SHA1"
 	}
@@ -197,7 +215,7 @@ func generateSHA1(args []string, env *models.Environment) string {
 	return hex.EncodeToString(hash[:])
 }
 
-func generateSHA256(args []string, env *models.Environment) string {
+func generateSHA256(args []string, env *domain.Environment) string {
 	if len(args) == 0 {
 		return "Error: No input provided for SHA256"
 	}
@@ -214,7 +232,7 @@ func capitalize(s string) string {
 	return string(append([]rune{unicode.ToUpper(r[0])}, r[1:]...))
 }
 
-func getEnvOrArg(arg string, env *models.Environment) string {
+func getEnvOrArg(arg string, env *domain.Environment) string {
 	if strings.HasPrefix(arg, "$") {
 		varName := strings.TrimPrefix(arg, "$")
 		if value, exists := env.Variables[varName]; exists {
@@ -224,7 +242,7 @@ func getEnvOrArg(arg string, env *models.Environment) string {
 	return arg
 }
 
-func getEnvVariable(args []string, env *models.Environment) string {
+func getEnvVariable(args []string, env *domain.Environment) string {
 	if len(args) == 0 {
 		return "Error: No environment variable name provided"
 	}

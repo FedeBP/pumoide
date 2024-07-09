@@ -7,6 +7,7 @@ replace github.com/FedeBP/pumoide/backend => ./
 require (
 	github.com/aws/aws-sdk-go v1.54.15
 	github.com/google/uuid v1.6.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/oliveagle/jsonpath v0.0.0-20180606110733-2e52cf6e6852
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.9.0

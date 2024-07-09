@@ -6,7 +6,7 @@ PumoIDE is a powerful API development and testing tool, designed to streamline y
 
 - **Collection Management**: Organize your API requests into collections for easy access and management.
 - **Environment Support**: Create and manage multiple environments to easily switch between different setups.
-- **Request Chaining**: Define dependencies between requests to create complex workflows.
+- **RestRequest Chaining**: Define dependencies between requests to create complex workflows.
 - **Response Validation**: Validate API responses using JSON schema and custom assertions.
 - **Authentication Support**: Handles various authentication methods including Basic, Bearer Token, API Key, OAuth2, AWS SigV4, and Digest.
 - **Rate Limiting**: Built-in rate limiting to prevent overloading of APIs.
@@ -61,7 +61,7 @@ The server will start and write its port to an environment variable.
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a Pull RestRequest.
 
 ## License
 

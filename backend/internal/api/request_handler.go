@@ -1,372 +1,211 @@
 package api
 
 import (
-	"bytes"
-	"context"
-	"crypto/tls"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
-	"net/http/httptrace"
-	"net/url"
-	"regexp"
-	"strconv"
-	"strings"
+	"sync"
 	"time"
 
+	"github.com/FedeBP/pumoide/backend/internal/domain"
+	"github.com/FedeBP/pumoide/backend/internal/factory"
 	"github.com/FedeBP/pumoide/backend/internal/models"
 	"github.com/FedeBP/pumoide/backend/internal/utils"
-	"github.com/FedeBP/pumoide/backend/internal/validators"
-	"github.com/FedeBP/pumoide/backend/pkg/constants"
-	"github.com/FedeBP/pumoide/backend/pkg/errors"
-	"github.com/oliveagle/jsonpath"
 	"github.com/sirupsen/logrus"
 )
 
 type RequestHandler struct {
-	Client          *http.Client
-	EnvironmentPath string
 	Logger          *logrus.Logger
-	WorkerCount     int
 	HistoryManager  *models.History
+	EnvironmentPath string
 }
 
-var oauth2Managers = make(map[string]*validators.OAuth2Manager)
-
-func (h *RequestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	bodyBytes, err := io.ReadAll(r.Body)
+func (h *RequestHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadRequestBody, err, h.Logger)
+		h.respondWithError(w, http.StatusBadRequest, "Failed to read request body")
 		return
 	}
-	err = r.Body.Close()
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToCloseBody, err, h.Logger)
-		return
-	}
-
-	var requests []models.Request
-	err = json.Unmarshal(bodyBytes, &requests)
-	if err != nil {
-		var singleRequest models.Request
-		err = json.Unmarshal(bodyBytes, &singleRequest)
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
 		if err != nil {
-			errors.RespondWithError(w, http.StatusBadRequest, constants.ErrInvalidRequestBody, err, h.Logger)
 			return
 		}
-		requests = []models.Request{singleRequest}
-	}
+	}(r.Body)
 
-	envID := r.URL.Query().Get(constants.Env)
-	var env *models.Environment
-	if envID != constants.EmptyString {
-		env, err = models.LoadEnvironment(h.EnvironmentPath, envID)
+	var requestDataList []map[string]interface{}
+	err = json.Unmarshal(body, &requestDataList)
+
+	if err != nil {
+		var singleRequest map[string]interface{}
+		err = json.Unmarshal(body, &singleRequest)
 		if err != nil {
-			errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToLoadEnvironment, err, h.Logger)
+			h.respondWithError(w, http.StatusBadRequest, "Invalid request body: "+err.Error())
 			return
 		}
-	} else {
-		env = &models.Environment{Variables: make(map[string]string)}
+		requestDataList = []map[string]interface{}{singleRequest}
 	}
 
-	results, err := h.ExecuteRequests(requests, env)
-	if err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToExecuteRequest, err, h.Logger)
-		return
-	}
-
-	w.Header().Set(constants.ContentType, constants.AppJson)
-	if err := json.NewEncoder(w).Encode(results); err != nil {
-		errors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
-	}
-}
-
-func (h *RequestHandler) ExecuteRequests(requests []models.Request, env *models.Environment) ([]models.RequestResult, error) {
-	results := make([]models.RequestResult, len(requests))
-	completedRequests := make(map[string]bool)
-	allFailed := true
-
-	for i, req := range requests {
-		for _, depID := range req.DependsOn {
-			if !completedRequests[depID] {
-				return results[:i], fmt.Errorf("dependency %s not completed for request %s", depID, req.ID)
-			}
-		}
-
-		result := h.ExecuteRequest(req, env, results[:i])
-		results[i] = result
-
-		completedRequests[req.ID] = true
-
-		if result.Error == "" && len(result.ValidationErrors) == 0 {
-			allFailed = false
-		}
-
-		if result.Error != "" {
-			return results[:i+1], fmt.Errorf("error in request %s: %s", req.ID, result.Error)
-		}
-	}
-
-	if allFailed {
-		return results, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedAllRequests, nil)
-	}
-
-	return results, nil
-}
-
-func (h *RequestHandler) ExecuteRequest(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.RequestResult {
-	result := models.RequestResult{
-		Request: req,
-	}
-
-	req = h.substituteVariables(req, env, previousResults)
-
-	httpReq, err := h.prepareRequest(req, env)
-	if err != nil {
-		result.Error = err.Error()
-		return result
-	}
-
-	if req.Auth != nil && req.Auth.Type == models.AuthOAuth2 {
-		err = h.refreshOAuth2TokenIfNeeded(httpReq, req.Auth)
+	env := h.loadEnvironment(r)
+	requests := make([]domain.Request, len(requestDataList))
+	for i, requestData := range requestDataList {
+		request, err := factory.CreateRequest(requestData)
 		if err != nil {
-			result.Error = err.Error()
-			return result
+			h.respondWithError(w, http.StatusBadRequest, err.Error())
+			return
 		}
+		requests[i] = request
 	}
 
-	var start, connect, dns, tlsHandshake time.Time
-	var serverProcessing time.Duration
+	results := h.executeRequests(requests, env)
 
-	trace := &httptrace.ClientTrace{
-		DNSStart:          func(dsi httptrace.DNSStartInfo) { dns = time.Now() },
-		DNSDone:           func(ddi httptrace.DNSDoneInfo) { result.PerformanceMetrics.DNSLookup = time.Since(dns) },
-		ConnectStart:      func(network, addr string) { connect = time.Now() },
-		ConnectDone:       func(network, addr string, err error) { result.PerformanceMetrics.TCPConnection = time.Since(connect) },
-		TLSHandshakeStart: func() { tlsHandshake = time.Now() },
-		TLSHandshakeDone: func(cs tls.ConnectionState, err error) {
-			result.PerformanceMetrics.TLSHandshake = time.Since(tlsHandshake)
-		},
-		GotFirstResponseByte: func() { serverProcessing = time.Since(start) },
-	}
-
-	httpReq = httpReq.WithContext(httptrace.WithClientTrace(httpReq.Context(), trace))
-
-	startTime := time.Now()
-	resp, clientErr := h.Client.Do(httpReq)
-	if clientErr != nil {
-		result.Error = fmt.Sprintf("%s: %v", constants.ErrFailedToExecuteRequest, clientErr)
-		return result
-	}
-	defer func() {
-		if err := resp.Body.Close(); err != nil {
-			h.Logger.Warnf("%s: %v", constants.ErrFailedToCloseBody, err)
-		}
-	}()
-
-	bodyStart := time.Now()
-	body, clientErr := io.ReadAll(resp.Body)
-	if clientErr != nil {
-		result.Error = fmt.Sprintf("%s: %v", constants.ErrFailedToReadResponse, clientErr)
-		return result
-	}
-	bodyEnd := time.Now()
-
-	result.PerformanceMetrics.ServerProcessing = serverProcessing
-	result.PerformanceMetrics.ContentTransfer = bodyEnd.Sub(bodyStart)
-	result.PerformanceMetrics.Total = time.Since(start)
-
-	result.Response = models.Response{
-		StatusCode: resp.StatusCode,
-		Headers:    make(map[string]string),
-		Body:       string(body),
-	}
-
-	for k, v := range resp.Header {
-		result.Response.Headers[k] = v[0]
-	}
-
-	if len(req.ExtractVariables) > 0 {
-		for varName, extractPath := range req.ExtractVariables {
-			extractedValue, err := extractValueFromResponse(result.Response, extractPath)
-			if err == nil {
-				env.Variables[varName] = extractedValue
-			} else {
-				h.Logger.Warnf("Failed to extract variable %s: %v", varName, err)
-			}
-		}
-	}
-
-	if req.ResponseValidation != nil {
-		validationErrors := validators.ValidateResponse(result.Response, req.ResponseValidation)
-		if len(validationErrors) > 0 {
-			result.ValidationErrors = validationErrors
-		}
-	}
-
-	executionTime := time.Since(startTime)
-
-	if h.HistoryManager != nil {
-		entry := models.HistoryEntry{
-			Timestamp:     time.Now(),
-			Request:       req,
-			Response:      result.Response,
-			ExecutionTime: executionTime,
-		}
-		if err := h.HistoryManager.AddEntry(entry); err != nil {
-			h.Logger.Warnf(constants.ErrFailedToAddHistory+": %v", err)
-		}
-	}
-
-	return result
+	h.writeResponse(w, results)
 }
 
-func (h *RequestHandler) substituteVariables(req models.Request, env *models.Environment, previousResults []models.RequestResult) models.Request {
-	if env == nil {
-		env = &models.Environment{Variables: make(map[string]string)}
-	}
+func (h *RequestHandler) executeRequests(requests []domain.Request, env *domain.Environment) []domain.RequestResult {
+	results := make([]domain.RequestResult, len(requests))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 
-	combinedEnv := &models.Environment{
-		Variables: make(map[string]string),
-	}
+	completed := make(map[string]bool)
 
-	for k, v := range env.Variables {
-		combinedEnv.Variables[k] = v
-	}
+	for {
+		readyRequests := h.getReadyRequests(requests, completed)
+		if len(readyRequests) == 0 {
+			break
+		}
 
-	for _, prevResult := range previousResults {
-		if prevResult.Request.ExtractVariables != nil {
-			for varName, extractPath := range prevResult.Request.ExtractVariables {
-				extractedValue, err := extractValueFromResponse(prevResult.Response, extractPath)
-				if err == nil {
-					combinedEnv.Variables[varName] = extractedValue
+		for _, req := range readyRequests {
+			wg.Add(1)
+			go func(r domain.Request) {
+				defer wg.Done()
+
+				h.preprocessRequest(r, env)
+
+				startTime := time.Now()
+				response, err := r.Execute(env)
+				executionTime := time.Since(startTime)
+
+				result := domain.RequestResult{
+					Request:  r,
+					Response: response,
+					PerformanceMetrics: domain.PerformanceMetrics{
+						Total: executionTime,
+					},
 				}
+
+				if err != nil {
+					result.Error = err.Error()
+				} else {
+					h.postprocessRequest(r, response, env)
+				}
+
+				mu.Lock()
+				results[h.findRequestIndex(requests, r.GetID())] = result
+				completed[r.GetID()] = true
+				mu.Unlock()
+
+				h.saveToHistory(r, response, executionTime)
+			}(req)
+		}
+
+		wg.Wait()
+	}
+
+	return results
+}
+
+func (h *RequestHandler) getReadyRequests(requests []domain.Request, completed map[string]bool) []domain.Request {
+	var readyRequests []domain.Request
+	for _, req := range requests {
+		if completed[req.GetID()] {
+			continue
+		}
+		ready := true
+		for _, depID := range req.GetDependsOn() {
+			if !completed[depID] {
+				ready = false
+				break
 			}
 		}
-	}
-
-	substituteFunc := func(input string) string {
-		return utils.SubstituteVariables(input, combinedEnv)
-	}
-
-	req.URL = substituteFunc(req.URL)
-	req.Body = substituteFunc(req.Body)
-	for i, header := range req.Headers {
-		req.Headers[i].Value = substituteFunc(header.Value)
-	}
-	for key, value := range req.QueryParams {
-		req.QueryParams[key] = substituteFunc(value)
-	}
-
-	return req
-}
-
-func (h *RequestHandler) prepareRequest(req models.Request, env *models.Environment) (*http.Request, *errors.AppError) {
-	if !req.Method.IsValid() {
-		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidHTTPMethod, nil)
-	}
-
-	parsedURL, err := url.Parse(utils.SubstituteVariables(req.URL, env))
-	if err != nil {
-		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidURL, err)
-	}
-
-	q := parsedURL.Query()
-	for key, value := range req.QueryParams {
-		q.Add(key, utils.SubstituteVariables(value, env))
-	}
-	parsedURL.RawQuery = q.Encode()
-
-	httpReq, err := http.NewRequest(string(req.Method), parsedURL.String(), bytes.NewBufferString(utils.SubstituteVariables(req.Body, env)))
-	if err != nil {
-		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToCreateRequest, err)
-	}
-
-	for _, header := range req.Headers {
-		httpReq.Header.Set(header.Key, utils.SubstituteVariables(header.Value, env))
-	}
-
-	if req.Auth != nil {
-		err = validators.ApplyAuthentication(httpReq, req.Auth, env)
-		if err != nil {
-			return nil, errors.NewAppError(http.StatusForbidden, constants.ErrFailedToAuthenticate, err)
+		if ready {
+			readyRequests = append(readyRequests, req)
 		}
 	}
-
-	return httpReq, nil
+	return readyRequests
 }
 
-func extractValueFromResponse(response models.Response, extractPath string) (string, error) {
-	if strings.HasPrefix(extractPath, "$") {
-		return extractJSONValue(response.Body, extractPath)
-	} else {
-		return extractRegexValue(response.Body, extractPath)
-	}
-}
-
-func extractJSONValue(responseBody string, jsonPath string) (string, error) {
-	var data interface{}
-	err := json.Unmarshal([]byte(responseBody), &data)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse JSON: %v", err)
-	}
-
-	result, err := jsonpath.JsonPathLookup(data, jsonPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to extract value using JSON path: %v", err)
-	}
-
-	switch v := result.(type) {
-	case string:
-		return v, nil
-	case float64:
-		return strconv.FormatFloat(v, 'f', -1, 64), nil
-	case bool:
-		return strconv.FormatBool(v), nil
-	default:
-		return fmt.Sprintf("%v", v), nil
-	}
-}
-
-func extractRegexValue(responseBody string, regexPattern string) (string, error) {
-	re, err := regexp.Compile(regexPattern)
-	if err != nil {
-		return "", fmt.Errorf("invalid regex pattern: %v", err)
-	}
-
-	matches := re.FindStringSubmatch(responseBody)
-	if len(matches) > 1 {
-		return matches[1], nil
-	} else if len(matches) == 1 {
-		return matches[0], nil
-	}
-
-	return "", fmt.Errorf("no match found for regex pattern")
-}
-
-func (h *RequestHandler) refreshOAuth2TokenIfNeeded(httpReq *http.Request, authConfig *models.Auth) *errors.AppError {
-	managerKey := authConfig.OAuth2.ClientID + authConfig.OAuth2.TokenURL
-	manager, ok := oauth2Managers[managerKey]
-	if !ok {
-		return errors.NewAppError(http.StatusInternalServerError, "OAuth2 manager not found", nil)
-	}
-
-	ctx, cancel := context.WithTimeout(httpReq.Context(), 30*time.Second)
-	defer cancel()
-
-	token, err := manager.GetToken(ctx, authConfig.OAuth2.GrantType, authConfig.Params)
-	if err != nil {
-		return errors.NewAppError(http.StatusInternalServerError, constants.ErrOAuth2Token, err)
-	}
-
-	if token.Expiry.Before(time.Now()) {
-		token, err = manager.RefreshToken(ctx)
-		if err != nil {
-			return errors.NewAppError(http.StatusInternalServerError, "Failed to refresh OAuth2 token", err)
+func (h *RequestHandler) findRequestIndex(requests []domain.Request, id string) int {
+	for i, req := range requests {
+		if req.GetID() == id {
+			return i
 		}
-		httpReq.Header.Set(constants.Authorization, constants.Bearer+token.AccessToken)
+	}
+	return -1
+}
+
+func (h *RequestHandler) loadEnvironment(r *http.Request) *domain.Environment {
+	envID := r.URL.Query().Get("env")
+	if envID == "" {
+		return &domain.Environment{Variables: make(map[string]string)}
 	}
 
-	return nil
+	env, err := domain.LoadEnvironment(h.EnvironmentPath, envID)
+	if err != nil {
+		h.Logger.Warnf("Failed to load environment %s: %v", envID, err)
+		return &domain.Environment{Variables: make(map[string]string)}
+	}
+
+	return env
+}
+
+func (h *RequestHandler) preprocessRequest(req domain.Request, env *domain.Environment) {
+	utils.SubstituteRequestVariables(req, env)
+}
+
+func (h *RequestHandler) postprocessRequest(req domain.Request, resp domain.Response, env *domain.Environment) {
+	for varName, extractPath := range req.GetExtractVariables() {
+		extractedValue, err := utils.ExtractValueFromResponse(resp, extractPath)
+		if err == nil {
+			env.Variables[varName] = extractedValue
+		} else {
+			h.Logger.Warnf("Failed to extract variable %s: %v", varName, err)
+		}
+	}
+}
+
+func (h *RequestHandler) saveToHistory(req domain.Request, resp domain.Response, executionTime time.Duration) {
+	if h.HistoryManager == nil {
+		return
+	}
+
+	entry := domain.HistoryEntry{
+		Timestamp:     time.Now(),
+		Request:       req,
+		Response:      resp,
+		ExecutionTime: executionTime,
+	}
+
+	if err := h.HistoryManager.AddEntry(entry); err != nil {
+		h.Logger.Warnf("Failed to add history entry: %v", err)
+	}
+}
+
+func (h *RequestHandler) writeResponse(w http.ResponseWriter, results []domain.RequestResult) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if err := json.NewEncoder(w).Encode(results); err != nil {
+		h.Logger.Errorf("Failed to write response: %v", err)
+	}
+}
+
+func (h *RequestHandler) respondWithError(w http.ResponseWriter, statusCode int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	response := map[string]string{"error": message}
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.Logger.Errorf("Failed to write error response: %v", err)
+	}
 }

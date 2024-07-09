@@ -1,7 +1,6 @@
 package app
 
 import (
-	"net"
 	"net/http"
 
 	"github.com/FedeBP/pumoide/backend/internal/api"
@@ -16,33 +15,13 @@ func (a *Pumoide) InitRoutes() {
 		limiter,
 	))
 
-	a.Router.Handle("/pumoide-api/execute", middleware.RateLimitMiddleware(
-		&api.RequestHandler{
-			Client: &http.Client{
-				Transport: &http.Transport{
-					DialContext: (&net.Dialer{
-						Timeout:   a.Config.DialTimeout,
-						KeepAlive: a.Config.KeepAlive,
-					}).DialContext,
-					ForceAttemptHTTP2:     true,
-					MaxIdleConns:          a.Config.MaxIdleConns,
-					IdleConnTimeout:       a.Config.IdleConnTimeout,
-					TLSHandshakeTimeout:   a.Config.TLSHandshakeTimeout,
-					ExpectContinueTimeout: a.Config.ExpectContinueTimeout,
-					DisableCompression:    a.Config.DisableCompression,
-					DisableKeepAlives:     a.Config.DisableKeepAlives,
-					MaxIdleConnsPerHost:   a.Config.MaxIdleConnsPerHost,
-					ResponseHeaderTimeout: a.Config.ResponseHeaderTimeout,
-				},
-				Timeout: a.Config.ClientTimeout,
-			},
-			EnvironmentPath: a.Config.DefaultEnvironmentsPath,
-			Logger:          a.Logger,
-			WorkerCount:     a.Config.Workers,
-			HistoryManager:  a.HistoryManager,
-		},
-		limiter,
-	))
+	requestHandler := &api.RequestHandler{
+		Logger:          a.Logger,
+		HistoryManager:  a.HistoryManager,
+		EnvironmentPath: a.Config.DefaultEnvironmentsPath,
+	}
+
+	a.Router.Handle("/pumoide-api/execute", middleware.RateLimitMiddleware(http.HandlerFunc(requestHandler.HandleRequest), limiter))
 
 	a.Router.Handle("/pumoide-api/environments", middleware.RateLimitMiddleware(
 		&api.EnvironmentHandler{DefaultPath: a.Config.DefaultEnvironmentsPath, Logger: a.Logger},

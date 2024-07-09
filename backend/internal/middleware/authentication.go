@@ -1,4 +1,4 @@
-package validators
+package middleware
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/FedeBP/pumoide/backend/internal/models"
+	"github.com/FedeBP/pumoide/backend/internal/domain"
 	"github.com/FedeBP/pumoide/backend/internal/utils"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	"github.com/FedeBP/pumoide/backend/pkg/errors"
@@ -15,24 +15,24 @@ import (
 	"github.com/aws/aws-sdk-go/aws/signer/v4"
 )
 
-var oauth2Managers = make(map[string]*OAuth2Manager)
+var oauth2Managers = make(map[string]*domain.OAuth2Manager)
 
-func ApplyAuthentication(req *http.Request, auth *models.Auth, env *models.Environment) error {
-	if auth == nil || auth.Type == models.AuthNone {
+func ApplyAuthentication(req *http.Request, auth *domain.Auth, env *domain.Environment) *errors.AppError {
+	if auth == nil || auth.Type == domain.AuthNone {
 		return nil
 	}
 
 	switch auth.Type {
-	case models.AuthBasic:
+	case domain.AuthBasic:
 		username := utils.SubstituteVariables(auth.Params[constants.Username], env)
 		password := utils.SubstituteVariables(auth.Params[constants.Password], env)
 		req.SetBasicAuth(username, password)
 
-	case models.AuthBearer:
+	case domain.AuthBearer:
 		token := utils.SubstituteVariables(auth.Params[constants.Token], env)
 		req.Header.Set(constants.Authorization, constants.Bearer+token)
 
-	case models.AuthAPIKey:
+	case domain.AuthAPIKey:
 		key := utils.SubstituteVariables(auth.Params[constants.Key], env)
 		value := utils.SubstituteVariables(auth.Params[constants.Value], env)
 		if auth.Params[constants.In] == constants.Header {
@@ -43,7 +43,7 @@ func ApplyAuthentication(req *http.Request, auth *models.Auth, env *models.Envir
 			req.URL.RawQuery = q.Encode()
 		}
 
-	case models.AuthOAuth2:
+	case domain.AuthOAuth2:
 		if auth.OAuth2 == nil {
 			return errors.NewAppError(http.StatusBadRequest, "OAuth2 configuration is missing", nil)
 		}
@@ -51,7 +51,7 @@ func ApplyAuthentication(req *http.Request, auth *models.Auth, env *models.Envir
 		managerKey := auth.OAuth2.ClientID + auth.OAuth2.TokenURL
 		manager, ok := oauth2Managers[managerKey]
 		if !ok {
-			manager = NewOAuth2Manager(auth.OAuth2)
+			manager = domain.NewOAuth2Manager(auth.OAuth2)
 			oauth2Managers[managerKey] = manager
 		}
 
@@ -72,7 +72,7 @@ func ApplyAuthentication(req *http.Request, auth *models.Auth, env *models.Envir
 
 		req.Header.Set(constants.Authorization, constants.Bearer+token.AccessToken)
 
-	case models.AuthAWSSigV4:
+	case domain.AuthAWSSigV4:
 		accessKey := utils.SubstituteVariables(auth.Params[constants.AccessKey], env)
 		secretKey := utils.SubstituteVariables(auth.Params[constants.SecretKey], env)
 		sessionToken := utils.SubstituteVariables(auth.Params[constants.SessionToken], env)
@@ -87,7 +87,7 @@ func ApplyAuthentication(req *http.Request, auth *models.Auth, env *models.Envir
 			return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedAwsSigV4, err)
 		}
 
-	case models.AuthDigest:
+	case domain.AuthDigest:
 		username := utils.SubstituteVariables(auth.Params[constants.Username], env)
 		password := utils.SubstituteVariables(auth.Params[constants.Password], env)
 		realm := utils.SubstituteVariables(auth.Params[constants.Realm], env)

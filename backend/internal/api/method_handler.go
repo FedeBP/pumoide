@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/FedeBP/pumoide/backend/internal/models"
+	"github.com/FedeBP/pumoide/backend/internal/domain"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	"github.com/FedeBP/pumoide/backend/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -20,7 +20,7 @@ func (h *MethodHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	validMethods := models.GetValidMethods()
+	validMethods := domain.GetValidMethods()
 
 	if len(validMethods) == 0 {
 		w.WriteHeader(http.StatusNoContent)

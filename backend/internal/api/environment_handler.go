@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/FedeBP/pumoide/backend/internal/models"
+	"github.com/FedeBP/pumoide/backend/internal/domain"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	"github.com/FedeBP/pumoide/backend/pkg/errors"
 	"github.com/google/uuid"
@@ -40,9 +40,9 @@ func (h *EnvironmentHandler) getEnvironments(w http.ResponseWriter) {
 		return
 	}
 
-	var environments []models.Environment
+	var environments []domain.Environment
 	for _, file := range files {
-		environment, err := models.LoadEnvironment(h.DefaultPath, filepath.Base(file[:len(file)-5]))
+		environment, err := domain.LoadEnvironment(h.DefaultPath, filepath.Base(file[:len(file)-5]))
 		if err != nil {
 			h.Logger.Printf(constants.ErrFailedToLoadEnvironment+" %s: %v", file, err)
 			continue
@@ -63,7 +63,7 @@ func (h *EnvironmentHandler) getEnvironments(w http.ResponseWriter) {
 }
 
 func (h *EnvironmentHandler) createEnvironment(w http.ResponseWriter, r *http.Request) {
-	var environment models.Environment
+	var environment domain.Environment
 	err := json.NewDecoder(r.Body).Decode(&environment)
 	if err != nil {
 		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadEnvironment, err, h.Logger)
@@ -93,14 +93,14 @@ func (h *EnvironmentHandler) updateEnvironment(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	var updatedEnvironment models.Environment
+	var updatedEnvironment domain.Environment
 	err := json.NewDecoder(r.Body).Decode(&updatedEnvironment)
 	if err != nil {
 		errors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadEnvironment, err, h.Logger)
 		return
 	}
 
-	existingEnvironment, err := models.LoadEnvironment(h.DefaultPath, id)
+	existingEnvironment, err := domain.LoadEnvironment(h.DefaultPath, id)
 	if err != nil {
 		errors.RespondWithError(w, http.StatusNotFound, constants.ErrEnvironmentNotFound, err, h.Logger)
 		return

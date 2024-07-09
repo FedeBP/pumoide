@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/FedeBP/pumoide/backend/internal/domain"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	"github.com/FedeBP/pumoide/backend/pkg/errors"
 	"github.com/google/uuid"
@@ -22,15 +23,6 @@ type History struct {
 	mutex      sync.RWMutex
 }
 
-type HistoryEntry struct {
-	ID                 string             `json:"id"`
-	Timestamp          time.Time          `json:"timestamp"`
-	Request            Request            `json:"request"`
-	Response           Response           `json:"response"`
-	ExecutionTime      time.Duration      `json:"executionTime"`
-	PerformanceMetrics PerformanceMetrics `json:"performance_metrics"`
-}
-
 func NewHistoryManager(basePath string, maxAge time.Duration, maxEntries int) *History {
 	return &History{
 		basePath:   filepath.Join(basePath, "history"),
@@ -39,7 +31,7 @@ func NewHistoryManager(basePath string, maxAge time.Duration, maxEntries int) *H
 	}
 }
 
-func (hm *History) AddEntry(entry HistoryEntry) error {
+func (hm *History) AddEntry(entry domain.HistoryEntry) error {
 	hm.mutex.Lock()
 	defer hm.mutex.Unlock()
 
@@ -66,7 +58,7 @@ func (hm *History) AddEntry(entry HistoryEntry) error {
 	return nil
 }
 
-func (hm *History) GetEntry(id string) (*HistoryEntry, error) {
+func (hm *History) GetEntry(id string) (*domain.HistoryEntry, error) {
 	hm.mutex.RLock()
 	defer hm.mutex.RUnlock()
 
@@ -76,7 +68,7 @@ func (hm *History) GetEntry(id string) (*HistoryEntry, error) {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToReadResponse, err)
 	}
 
-	var entry HistoryEntry
+	var entry domain.HistoryEntry
 	if err := json.Unmarshal(data, &entry); err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrInvalidRequestBody, err)
 	}
@@ -84,7 +76,7 @@ func (hm *History) GetEntry(id string) (*HistoryEntry, error) {
 	return &entry, nil
 }
 
-func (hm *History) GetEntries(page, pageSize int) ([]HistoryEntry, error) {
+func (hm *History) GetEntries(page, pageSize int) ([]domain.HistoryEntry, error) {
 	hm.mutex.RLock()
 	defer hm.mutex.RUnlock()
 
@@ -93,14 +85,14 @@ func (hm *History) GetEntries(page, pageSize int) ([]HistoryEntry, error) {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToReadResponse, err)
 	}
 
-	var entries []HistoryEntry
+	var entries []domain.HistoryEntry
 	for _, file := range files {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			continue
 		}
 
-		var entry HistoryEntry
+		var entry domain.HistoryEntry
 		if err := json.Unmarshal(data, &entry); err != nil {
 			continue
 		}
@@ -115,7 +107,7 @@ func (hm *History) GetEntries(page, pageSize int) ([]HistoryEntry, error) {
 	start := (page - 1) * pageSize
 	end := start + pageSize
 	if start >= len(entries) {
-		return []HistoryEntry{}, nil
+		return []domain.HistoryEntry{}, nil
 	}
 	if end > len(entries) {
 		end = len(entries)
@@ -145,14 +137,14 @@ func (hm *History) cleanup() {
 		return
 	}
 
-	var entries []HistoryEntry
+	var entries []domain.HistoryEntry
 	for _, file := range files {
 		data, err := os.ReadFile(file)
 		if err != nil {
 			continue
 		}
 
-		var entry HistoryEntry
+		var entry domain.HistoryEntry
 		if err := json.Unmarshal(data, &entry); err != nil {
 			continue
 		}
