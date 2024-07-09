@@ -124,7 +124,7 @@ func (r *RESTRequest) Validate() error {
 
 	if r.Auth != nil {
 		if err := r.Auth.Validate(); err != nil {
-			return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrInvalidAuth, r.Auth), err)
+			return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrInvalidAuth, r.Auth.Type), err)
 		}
 	}
 
