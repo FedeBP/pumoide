@@ -111,7 +111,8 @@ func (r *RESTRequest) Validate() error {
 		return errors.NewAppError(http.StatusMethodNotAllowed, fmt.Sprintf(constants.ErrInvalidHTTPMethod+": %s", r.Method), nil)
 	}
 
-	if _, err := url.Parse(r.URL); err != nil {
+	u, err := url.Parse(r.URL)
+	if err != nil || (u.Scheme == constants.EmptyString && u.Host == constants.EmptyString) {
 		return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrInvalidURL+": %s", r.URL), err)
 	}
 
