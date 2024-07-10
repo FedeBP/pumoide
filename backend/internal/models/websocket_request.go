@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"time"
 
@@ -46,7 +47,14 @@ func (r *WebSocketRequest) Execute(ctx context.Context, env *domain.Environment,
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("Error closing WebSocket connection: %v", closeErr)
+			if err == nil {
+				err = errors.NewAppError(http.StatusInternalServerError, "Failed to close WebSocket connection", closeErr)
+			}
+		}
+	}()
 
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(r.Message)); err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, "Failed to send ws message", err)
@@ -212,67 +220,51 @@ func (r *WebSocketRequest) UnmarshalJSON(data []byte) error {
 func (r *WebSocketRequest) GetID() string {
 	return r.ID
 }
-
 func (r *WebSocketRequest) SetID(ID string) {
 	r.ID = ID
 }
-
 func (r *WebSocketRequest) GetName() string {
 	return r.Name
 }
-
 func (r *WebSocketRequest) GetType() domain.RequestType {
 	return r.Type
 }
-
 func (r *WebSocketRequest) GetAuth() *domain.Auth {
 	return r.Auth
 }
-
 func (r *WebSocketRequest) GetHeaders() []domain.Header {
 	return r.Headers
 }
-
 func (r *WebSocketRequest) SetHeaders(headers []domain.Header) {
 	r.Headers = headers
 }
-
 func (r *WebSocketRequest) GetQueryParams() map[string]string {
 	return r.QueryParams
 }
-
 func (r *WebSocketRequest) SetQueryParams(params map[string]string) {
 	r.QueryParams = params
 }
-
 func (r *WebSocketRequest) GetDependsOn() []string {
 	return r.DependsOn
 }
-
 func (r *WebSocketRequest) GetExtractVariables() map[string]string {
 	return r.ExtractVariables
 }
-
 func (r *WebSocketRequest) GetTimeout() *time.Duration {
 	return r.Timeout
 }
-
 func (r *WebSocketRequest) GetURL() string {
 	return r.URL
 }
-
 func (r *WebSocketRequest) SetURL(url string) {
 	r.URL = url
 }
-
 func (r *WebSocketRequest) GetBodyOrMessage() string {
 	return r.Message
 }
-
 func (r *WebSocketRequest) SetBodyOrMessage(s string) {
 	r.Message = s
 }
-
 func (r *WebSocketRequest) GetContext() context.Context {
 	return context.Background()
 }

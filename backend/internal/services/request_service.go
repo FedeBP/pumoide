@@ -86,7 +86,17 @@ func (s *RequestService) ExecuteRequests(requestDataList []map[string]interface{
 func (s *RequestService) executeRequest(req domain.Request, env *domain.Environment, results []domain.RequestResult) domain.RequestResult {
 	for _, depID := range req.GetDependsOn() {
 		for _, result := range results {
-			if result.Request.GetID() == depID && result.Error != constants.EmptyString {
+			if result.Request == nil {
+				continue
+			}
+
+			resultID := result.Request.GetID()
+			if resultID == constants.EmptyString {
+				s.Logger.Warnf("Request in results doesn't have an ID. Can't match dependency: %s", depID)
+				continue
+			}
+
+			if resultID == depID && result.Error != constants.EmptyString {
 				return domain.RequestResult{
 					Request: req,
 					Error:   fmt.Sprintf("Dependent request %s failed", depID),

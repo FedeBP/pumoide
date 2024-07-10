@@ -14,16 +14,25 @@ func CreateRequest(data map[string]interface{}) (domain.Request, error) {
 		return nil, fmt.Errorf("missing or invalid 'type' field")
 	}
 
+	var req domain.Request
+	var err error
+
 	switch domain.RequestType(requestType) {
 	case domain.RequestTypeREST:
-		return createRESTRequest(data)
+		req, err = createRESTRequest(data)
 	case domain.RequestTypeWebSocket:
-		return createWebSocketRequest(data)
+		req, err = createWebSocketRequest(data)
 	case domain.RequestTypeGraphQL:
-		return createGraphQLRequest(data)
+		req, err = createGraphQLRequest(data)
 	default:
 		return nil, fmt.Errorf("unsupported request type: %s", requestType)
 	}
+
+	if err != nil {
+		return nil, fmt.Errorf("error creating %s request: %w", requestType, err)
+	}
+
+	return req, nil
 }
 
 func createRESTRequest(data map[string]interface{}) (*models.RESTRequest, error) {
@@ -40,13 +49,13 @@ func createRESTRequest(data map[string]interface{}) (*models.RESTRequest, error)
 	}
 
 	method, ok := data["method"].(string)
-	if !ok {
+	if !ok || method == "" {
 		return nil, fmt.Errorf("missing or invalid 'method' field")
 	}
 	req.Method = domain.Method(method)
 
 	url, ok := data["url"].(string)
-	if !ok {
+	if !ok || url == "" {
 		return nil, fmt.Errorf("missing or invalid 'url' field")
 	}
 	req.URL = url
@@ -76,7 +85,8 @@ func createRESTRequest(data map[string]interface{}) (*models.RESTRequest, error)
 	}
 
 	if timeout, ok := data["timeout"].(float64); ok {
-		*req.Timeout = time.Duration(timeout) * time.Millisecond
+		duration := time.Duration(timeout) * time.Millisecond
+		req.Timeout = &duration
 	}
 
 	if validation, ok := data["responseValidation"].(map[string]interface{}); ok {
@@ -100,7 +110,7 @@ func createWebSocketRequest(data map[string]interface{}) (*models.WebSocketReque
 	}
 
 	url, ok := data["url"].(string)
-	if !ok {
+	if !ok || url == "" {
 		return nil, fmt.Errorf("missing or invalid 'url' field")
 	}
 	req.URL = url
@@ -138,7 +148,8 @@ func createWebSocketRequest(data map[string]interface{}) (*models.WebSocketReque
 	}
 
 	if timeout, ok := data["timeout"].(float64); ok {
-		*req.Timeout = time.Duration(timeout) * time.Millisecond
+		duration := time.Duration(timeout) * time.Millisecond
+		req.Timeout = &duration
 	}
 
 	if validation, ok := data["responseValidation"].(map[string]interface{}); ok {
@@ -162,13 +173,13 @@ func createGraphQLRequest(data map[string]interface{}) (*models.GraphQLRequest, 
 	}
 
 	url, ok := data["url"].(string)
-	if !ok {
+	if !ok || url == "" {
 		return nil, fmt.Errorf("missing or invalid 'url' field")
 	}
 	req.URL = url
 
 	query, ok := data["query"].(string)
-	if !ok {
+	if !ok || query == "" {
 		return nil, fmt.Errorf("missing or invalid 'query' field")
 	}
 	req.SetQuery(query)
@@ -198,7 +209,8 @@ func createGraphQLRequest(data map[string]interface{}) (*models.GraphQLRequest, 
 	}
 
 	if timeout, ok := data["timeout"].(float64); ok {
-		*req.Timeout = time.Duration(timeout) * time.Millisecond
+		duration := time.Duration(timeout) * time.Millisecond
+		req.Timeout = &duration
 	}
 
 	if validation, ok := data["responseValidation"].(map[string]interface{}); ok {

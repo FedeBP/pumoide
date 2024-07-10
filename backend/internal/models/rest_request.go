@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 
@@ -58,7 +59,14 @@ func (r *RESTRequest) Execute(ctx context.Context, env *domain.Environment, tran
 	if err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToExecuteRequest, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Error closing response body: %v", closeErr)
+			if err == nil {
+				err = errors.NewAppError(http.StatusInternalServerError, "Failed to close response body", closeErr)
+			}
+		}
+	}()
 
 	return r.processResponse(resp)
 }
@@ -184,67 +192,51 @@ func (r *RESTRequest) UnmarshalJSON(data []byte) error {
 func (r *RESTRequest) GetID() string {
 	return r.ID
 }
-
 func (r *RESTRequest) SetID(ID string) {
 	r.ID = ID
 }
-
 func (r *RESTRequest) GetName() string {
 	return r.Name
 }
-
 func (r *RESTRequest) GetType() domain.RequestType {
 	return r.Type
 }
-
 func (r *RESTRequest) GetAuth() *domain.Auth {
 	return r.Auth
 }
-
 func (r *RESTRequest) GetHeaders() []domain.Header {
 	return r.Headers
 }
-
 func (r *RESTRequest) SetHeaders(headers []domain.Header) {
 	r.Headers = headers
 }
-
 func (r *RESTRequest) GetQueryParams() map[string]string {
 	return r.QueryParams
 }
-
 func (r *RESTRequest) SetQueryParams(params map[string]string) {
 	r.QueryParams = params
 }
-
 func (r *RESTRequest) GetDependsOn() []string {
 	return r.DependsOn
 }
-
 func (r *RESTRequest) GetExtractVariables() map[string]string {
 	return r.ExtractVariables
 }
-
 func (r *RESTRequest) GetTimeout() *time.Duration {
 	return r.Timeout
 }
-
 func (r *RESTRequest) GetURL() string {
 	return r.URL
 }
-
 func (r *RESTRequest) SetURL(url string) {
 	r.URL = url
 }
-
 func (r *RESTRequest) GetBodyOrMessage() string {
 	return r.Body
 }
-
 func (r *RESTRequest) SetBodyOrMessage(s string) {
 	r.Body = s
 }
-
 func (r *RESTRequest) GetContext() context.Context {
 	return context.Background()
 }

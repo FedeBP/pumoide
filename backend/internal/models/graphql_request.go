@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -71,7 +72,14 @@ func (r *GraphQLRequest) Execute(ctx context.Context, env *domain.Environment, t
 	if err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToExecuteRequest, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			log.Printf("Error closing response body: %v", closeErr)
+			if err == nil {
+				err = errors.NewAppError(http.StatusInternalServerError, "Failed to close response body", closeErr)
+			}
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -211,7 +219,7 @@ func (r *GraphQLRequest) SetHeaders(headers []domain.Header) {
 func (r *GraphQLRequest) GetQueryParams() map[string]string {
 	return nil
 }
-func (r *GraphQLRequest) SetQueryParams(params map[string]string) {}
+func (r *GraphQLRequest) SetQueryParams(map[string]string) {}
 
 func (r *GraphQLRequest) GetDependsOn() []string {
 	return r.DependsOn
@@ -234,7 +242,6 @@ func (r *GraphQLRequest) GetBodyOrMessage() string {
 func (r *GraphQLRequest) SetBodyOrMessage(s string) {
 	r.Query = s
 }
-
 func (r *GraphQLRequest) GetContext() context.Context {
 	return context.Background()
 }

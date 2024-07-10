@@ -3,7 +3,6 @@ package utils
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/FedeBP/pumoide/backend/internal/domain"
 )
@@ -22,11 +21,4 @@ func ConvertHeaders(httpHeaders http.Header) []domain.Header {
 		}
 	}
 	return headers
-}
-
-func DurationToString(d *time.Duration) string {
-	if d == nil {
-		return ""
-	}
-	return d.String()
 }
