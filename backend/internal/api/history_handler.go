@@ -83,6 +83,10 @@ func (h *HistoryHandler) getEntry(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var appErr *customErrors.AppError
 		if errors.As(err, &appErr) {
+			if appErr.Code == http.StatusNoContent {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
 		} else {
 			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToReadResponse, err, h.Logger)

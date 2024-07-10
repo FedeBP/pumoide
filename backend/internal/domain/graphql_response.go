@@ -9,14 +9,14 @@ import (
 	"github.com/xeipuuv/gojsonschema"
 )
 
-type RESTResponse struct {
+type GraphQLResponse struct {
 	StatusCode       int
 	Headers          []Header
 	Body             interface{}
 	ValidationErrors []string
 }
 
-func (r *RESTResponse) Validate(validation *ResponseValidation) []string {
+func (r *GraphQLResponse) Validate(validation *ResponseValidation) []string {
 	var errs []string
 
 	if validation == nil {
@@ -36,7 +36,7 @@ func (r *RESTResponse) Validate(validation *ResponseValidation) []string {
 
 	bodyJSON, err := json.Marshal(r.Body)
 	if err != nil {
-		errs = append(errs, fmt.Sprintf("Failed to marshal response body: %v", err))
+		errs = append(errs, fmt.Sprintf("Failed to marshal GraphQL response body: %v", err))
 		return errs
 	}
 
@@ -60,11 +60,15 @@ func (r *RESTResponse) Validate(validation *ResponseValidation) []string {
 		}
 	}
 
+	if graphQLErrors, ok := r.Body.(map[string]interface{})["errors"]; ok {
+		errs = append(errs, fmt.Sprintf("GraphQL errors: %v", graphQLErrors))
+	}
+
 	r.ValidationErrors = errs
 	return errs
 }
 
-func (r *RESTResponse) getHeaderValue(key string) string {
+func (r *GraphQLResponse) getHeaderValue(key string) string {
 	for _, header := range r.Headers {
 		if strings.EqualFold(header.Key, key) {
 			return header.Value
@@ -73,14 +77,14 @@ func (r *RESTResponse) getHeaderValue(key string) string {
 	return ""
 }
 
-func (r *RESTResponse) GetBody() interface{} {
+func (r *GraphQLResponse) GetBody() interface{} {
 	return r.Body
 }
 
-func (r *RESTResponse) GetStatusCode() int {
+func (r *GraphQLResponse) GetStatusCode() int {
 	return r.StatusCode
 }
 
-func (r *RESTResponse) GetHeaders() []Header {
+func (r *GraphQLResponse) GetHeaders() []Header {
 	return r.Headers
 }

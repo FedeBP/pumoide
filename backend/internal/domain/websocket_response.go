@@ -9,7 +9,7 @@ import (
 )
 
 type WebSocketResponse struct {
-	Message          string
+	Messages         []interface{}
 	ValidationErrors []string
 }
 
@@ -20,9 +20,15 @@ func (r *WebSocketResponse) Validate(validation *ResponseValidation) []string {
 		return errs
 	}
 
+	messageJSON, err := json.Marshal(r.Messages)
+	if err != nil {
+		errs = append(errs, fmt.Sprintf("Failed to marshal WebSocket message: %v", err))
+		return errs
+	}
+
 	if validation.JSONSchema != "" {
 		schemaLoader := gojsonschema.NewStringLoader(validation.JSONSchema)
-		documentLoader := gojsonschema.NewStringLoader(r.Message)
+		documentLoader := gojsonschema.NewBytesLoader(messageJSON)
 
 		result, err := gojsonschema.Validate(schemaLoader, documentLoader)
 		if err != nil {
@@ -34,14 +40,8 @@ func (r *WebSocketResponse) Validate(validation *ResponseValidation) []string {
 		}
 	}
 
-	var responseBody map[string]interface{}
-	err := json.Unmarshal([]byte(r.Message), &responseBody)
-	if err != nil {
-		errs = append(errs, fmt.Sprintf("Failed to parse response body as JSON: %v", err))
-	}
-
 	for _, assertion := range validation.CustomAssertions {
-		if err := validators.EvaluateAssertion(assertion, r.Message); err != nil {
+		if err := validators.EvaluateAssertion(assertion, string(messageJSON)); err != nil {
 			errs = append(errs, fmt.Sprintf("Assertion failed: %v", err))
 		}
 	}
@@ -50,8 +50,8 @@ func (r *WebSocketResponse) Validate(validation *ResponseValidation) []string {
 	return errs
 }
 
-func (r *WebSocketResponse) GetBody() string {
-	return r.Message
+func (r *WebSocketResponse) GetBody() interface{} {
+	return r.Messages
 }
 
 func (r *WebSocketResponse) GetStatusCode() int {

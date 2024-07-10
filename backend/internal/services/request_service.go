@@ -1,13 +1,19 @@
 package services
 
 import (
+	"crypto/tls"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptrace"
 	"sync"
 	"time"
 
 	"github.com/FedeBP/pumoide/backend/internal/domain"
+	"github.com/FedeBP/pumoide/backend/internal/factory"
 	"github.com/FedeBP/pumoide/backend/internal/models"
 	"github.com/FedeBP/pumoide/backend/internal/utils"
+	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
@@ -26,62 +32,144 @@ func NewRequestService(logger *logrus.Logger, historyManager *models.History, en
 	}
 }
 
-func (s *RequestService) ExecuteRequests(requests []domain.Request, envID string) ([]domain.RequestResult, error) {
+func (s *RequestService) ExecuteRequests(requestDataList []map[string]interface{}, envID string) ([]domain.RequestResult, error) {
 	env := s.loadEnvironment(envID)
-	results := make([]domain.RequestResult, len(requests))
+	requests := make([]domain.Request, len(requestDataList))
+	results := make([]domain.RequestResult, len(requestDataList))
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	completed := make(map[string]bool)
+	allFailed := true
 
-	for {
-		readyRequests := s.getReadyRequests(requests, completed)
-		if len(readyRequests) == 0 {
-			break
+	for i, requestData := range requestDataList {
+		request, err := factory.CreateRequest(requestData)
+		if err != nil {
+			s.Logger.Errorf("Failed to create request: %v", err)
+			results[i] = domain.RequestResult{Error: err.Error()}
+			continue
 		}
-
-		for _, req := range readyRequests {
-			wg.Add(1)
-			go func(r domain.Request) {
-				defer wg.Done()
-
-				s.PreprocessRequest(r, env)
-
-				startTime := time.Now()
-				response, err := r.Execute(env)
-				executionTime := time.Since(startTime)
-
-				result := domain.RequestResult{
-					Request:  r,
-					Response: response,
-					PerformanceMetrics: domain.PerformanceMetrics{
-						Total: executionTime,
-					},
-				}
-
-				if err != nil {
-					result.Error = err.Error()
-				} else {
-					s.PostprocessRequest(r, response, env)
-				}
-
-				mu.Lock()
-				results[s.findRequestIndex(requests, r.GetID())] = result
-				completed[r.GetID()] = true
-				mu.Unlock()
-
-				s.saveToHistory(r, response, executionTime)
-			}(req)
-		}
-
-		wg.Wait()
+		requests[i] = request
 	}
 
-	return results, nil
+	for i, req := range requests {
+		if req == nil {
+			continue
+		}
+
+		wg.Add(1)
+		go func(i int, r domain.Request) {
+			defer wg.Done()
+
+			result := s.executeRequest(r, env, results)
+
+			mu.Lock()
+			results[i] = result
+			if result.Error == constants.EmptyString {
+				allFailed = false
+			}
+			mu.Unlock()
+
+			s.saveToHistory(r, result.Response, result.PerformanceMetrics.Total)
+		}(i, req)
+	}
+
+	wg.Wait()
+
+	var err error
+	if allFailed {
+		err = fmt.Errorf(constants.ErrFailedAllRequests)
+	}
+
+	return results, err
+}
+
+func (s *RequestService) executeRequest(req domain.Request, env *domain.Environment, results []domain.RequestResult) domain.RequestResult {
+	for _, depID := range req.GetDependsOn() {
+		for _, result := range results {
+			if result.Request.GetID() == depID && result.Error != constants.EmptyString {
+				return domain.RequestResult{
+					Request: req,
+					Error:   fmt.Sprintf("Dependent request %s failed", depID),
+				}
+			}
+		}
+	}
+
+	s.PreprocessRequest(req, env)
+
+	var result domain.RequestResult
+	result.Request = req
+
+	start := time.Now()
+	var connect, dns, tlsHandshake time.Time
+	var serverProcessing time.Duration
+
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+
+	trace := &httptrace.ClientTrace{
+		DNSStart: func(dsi httptrace.DNSStartInfo) { dns = time.Now() },
+		DNSDone: func(ddi httptrace.DNSDoneInfo) {
+			result.PerformanceMetrics.DNSLookup = time.Since(dns)
+		},
+		ConnectStart: func(network, addr string) { connect = time.Now() },
+		ConnectDone: func(network, addr string, err error) {
+			result.PerformanceMetrics.TCPConnection = time.Since(connect)
+		},
+		TLSHandshakeStart: func() { tlsHandshake = time.Now() },
+		TLSHandshakeDone: func(cs tls.ConnectionState, err error) {
+			result.PerformanceMetrics.TLSHandshake = time.Since(tlsHandshake)
+		},
+		GotFirstResponseByte: func() {
+			serverProcessing = time.Since(start)
+			result.PerformanceMetrics.ServerProcessing = serverProcessing
+		},
+	}
+
+	ctx := httptrace.WithClientTrace(req.GetContext(), trace)
+
+	response, err := req.Execute(ctx, env, transport)
+
+	result.Response = response
+	if err != nil {
+		result.Error = err.Error()
+	} else {
+		s.PostprocessRequest(req, response, env)
+	}
+
+	result.PerformanceMetrics.Total = time.Since(start)
+	result.PerformanceMetrics.ContentTransfer = result.PerformanceMetrics.Total -
+		(result.PerformanceMetrics.DNSLookup +
+			result.PerformanceMetrics.TCPConnection +
+			result.PerformanceMetrics.TLSHandshake +
+			result.PerformanceMetrics.ServerProcessing)
+
+	return result
+}
+
+func (s *RequestService) getReadyRequests(requests []domain.Request, completed, failed map[string]bool) []domain.Request {
+	var readyRequests []domain.Request
+	for _, req := range requests {
+		if completed[req.GetID()] {
+			continue
+		}
+		ready := true
+		for _, depID := range req.GetDependsOn() {
+			if !completed[depID] || failed[depID] {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			readyRequests = append(readyRequests, req)
+		}
+	}
+	return readyRequests
 }
 
 func (s *RequestService) loadEnvironment(envID string) *domain.Environment {
-	if envID == "" {
+	if envID == constants.EmptyString {
 		return &domain.Environment{Variables: make(map[string]string)}
 	}
 
@@ -92,26 +180,6 @@ func (s *RequestService) loadEnvironment(envID string) *domain.Environment {
 	}
 
 	return env
-}
-
-func (s *RequestService) getReadyRequests(requests []domain.Request, completed map[string]bool) []domain.Request {
-	var readyRequests []domain.Request
-	for _, req := range requests {
-		if completed[req.GetID()] {
-			continue
-		}
-		ready := true
-		for _, depID := range req.GetDependsOn() {
-			if !completed[depID] {
-				ready = false
-				break
-			}
-		}
-		if ready {
-			readyRequests = append(readyRequests, req)
-		}
-	}
-	return readyRequests
 }
 
 func (s *RequestService) findRequestIndex(requests []domain.Request, id string) int {
@@ -125,6 +193,15 @@ func (s *RequestService) findRequestIndex(requests []domain.Request, id string) 
 
 func (s *RequestService) PreprocessRequest(req domain.Request, env *domain.Environment) {
 	utils.SubstituteRequestVariables(req, env)
+
+	if graphqlReq, ok := req.(*models.GraphQLRequest); ok {
+		graphqlReq.Query = utils.SubstituteVariables(graphqlReq.Query, env)
+		for key, value := range graphqlReq.Variables {
+			if strValue, ok := value.(string); ok {
+				graphqlReq.Variables[key] = utils.SubstituteVariables(strValue, env)
+			}
+		}
+	}
 }
 
 func (s *RequestService) PostprocessRequest(req domain.Request, resp domain.Response, env *domain.Environment) {

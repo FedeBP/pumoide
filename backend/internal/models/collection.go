@@ -35,6 +35,10 @@ type ImportedCollection struct {
 				Mode string `json:"mode"`
 				Raw  string `json:"raw"`
 			} `json:"body"`
+			GraphQL *struct {
+				Query     string                 `json:"query"`
+				Variables map[string]interface{} `json:"variables"`
+			} `json:"graphql,omitempty"`
 		} `json:"request"`
 	} `json:"item"`
 }
@@ -48,10 +52,14 @@ type ExportedCollection struct {
 	Item []struct {
 		Name    string `json:"name"`
 		Request struct {
-			Method string            `json:"method"`
-			URL    string            `json:"url"`
-			Header []domain.Header   `json:"header"`
-			Body   map[string]string `json:"body"`
+			Method  string            `json:"method"`
+			URL     string            `json:"url"`
+			Header  []domain.Header   `json:"header"`
+			Body    map[string]string `json:"body,omitempty"`
+			GraphQL *struct {
+				Query     string                 `json:"query"`
+				Variables map[string]interface{} `json:"variables"`
+			} `json:"graphql,omitempty"`
 		} `json:"request"`
 	} `json:"item"`
 }
@@ -64,6 +72,13 @@ func (c *Collection) Save(path string) error {
 	if c.ID == constants.EmptyString {
 		c.ID = uuid.New().String()
 	}
+
+	for _, req := range c.Requests {
+		if req.GetID() == constants.EmptyString {
+			req.SetID(uuid.New().String())
+		}
+	}
+
 	data, err := json.Marshal(c)
 	if err != nil {
 		return err
@@ -113,10 +128,14 @@ func (c *Collection) ToExportedCollection() ExportedCollection {
 		item := struct {
 			Name    string `json:"name"`
 			Request struct {
-				Method string            `json:"method"`
-				URL    string            `json:"url"`
-				Header []domain.Header   `json:"header"`
-				Body   map[string]string `json:"body"`
+				Method  string            `json:"method"`
+				URL     string            `json:"url"`
+				Header  []domain.Header   `json:"header"`
+				Body    map[string]string `json:"body,omitempty"`
+				GraphQL *struct {
+					Query     string                 `json:"query"`
+					Variables map[string]interface{} `json:"variables"`
+				} `json:"graphql,omitempty"`
 			} `json:"request"`
 		}{
 			Name: req.GetName(),
@@ -141,6 +160,17 @@ func (c *Collection) ToExportedCollection() ExportedCollection {
 				"mode": "raw",
 				"raw":  r.Message,
 			}
+		case *GraphQLRequest:
+			item.Request.Method = "POST"
+			item.Request.URL = r.URL
+			item.Request.Header = r.GetHeaders()
+			item.Request.GraphQL = &struct {
+				Query     string                 `json:"query"`
+				Variables map[string]interface{} `json:"variables"`
+			}{
+				Query:     r.Query,
+				Variables: r.Variables,
+			}
 		}
 
 		exported.Item = append(exported.Item, item)
@@ -159,7 +189,20 @@ func NewCollectionFromImported(imported ImportedCollection) (*Collection, error)
 	for _, item := range imported.Item {
 		var newRequest domain.Request
 
-		if item.Request.Method == "websocket" {
+		if item.Request.GraphQL != nil {
+			graphqlReq := &GraphQLRequest{
+				ID:        uuid.New().String(),
+				Name:      item.Name,
+				Type:      domain.RequestTypeGraphQL,
+				URL:       item.Request.URL,
+				Query:     item.Request.GraphQL.Query,
+				Variables: item.Request.GraphQL.Variables,
+			}
+			for _, header := range item.Request.Header {
+				graphqlReq.Headers = append(graphqlReq.Headers, domain.Header{Key: header.Key, Value: header.Value})
+			}
+			newRequest = graphqlReq
+		} else if item.Request.Method == "websocket" {
 			wsReq := &WebSocketRequest{
 				ID:          uuid.New().String(),
 				Name:        item.Name,
@@ -241,6 +284,8 @@ func (c *Collection) UnmarshalJSON(data []byte) error {
 			request = &RESTRequest{}
 		case "websocket":
 			request = &WebSocketRequest{}
+		case "graphql":
+			request = &GraphQLRequest{}
 		default:
 			return fmt.Errorf("unknown request type: %s", requestType.Type)
 		}

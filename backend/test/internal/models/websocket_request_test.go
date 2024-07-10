@@ -1,9 +1,10 @@
 package models
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -11,22 +12,24 @@ import (
 	"github.com/FedeBP/pumoide/backend/internal/models"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWebSocketRequest_Validate(t *testing.T) {
+	timeout := 5 * time.Second
 	tests := []struct {
 		name    string
 		request models.WebSocketRequest
 		wantErr bool
 	}{
 		{
-			name: "Valid WebSocket request",
+			name: "Valid request",
 			request: models.WebSocketRequest{
 				Name:        "Test WebSocket",
 				URL:         "ws://example.com/socket",
 				MessageType: "text",
 				Message:     "Hello, WebSocket!",
-				Timeout:     30 * time.Second,
+				Timeout:     &timeout,
 			},
 			wantErr: false,
 		},
@@ -36,7 +39,7 @@ func TestWebSocketRequest_Validate(t *testing.T) {
 				Name:        "Test WebSocket",
 				MessageType: "text",
 				Message:     "Hello, WebSocket!",
-				Timeout:     30 * time.Second,
+				Timeout:     &timeout,
 			},
 			wantErr: true,
 		},
@@ -47,7 +50,7 @@ func TestWebSocketRequest_Validate(t *testing.T) {
 				URL:         "ws://example.com/socket",
 				MessageType: "invalid",
 				Message:     "Hello, WebSocket!",
-				Timeout:     30 * time.Second,
+				Timeout:     &timeout,
 			},
 			wantErr: true,
 		},
@@ -57,18 +60,7 @@ func TestWebSocketRequest_Validate(t *testing.T) {
 				Name:        "Test WebSocket",
 				URL:         "ws://example.com/socket",
 				MessageType: "text",
-				Timeout:     30 * time.Second,
-			},
-			wantErr: true,
-		},
-		{
-			name: "Invalid timeout",
-			request: models.WebSocketRequest{
-				Name:        "Test WebSocket",
-				URL:         "ws://example.com/socket",
-				MessageType: "text",
-				Message:     "Hello, WebSocket!",
-				Timeout:     0,
+				Timeout:     &timeout,
 			},
 			wantErr: true,
 		},
@@ -87,19 +79,13 @@ func TestWebSocketRequest_Validate(t *testing.T) {
 }
 
 func TestWebSocketRequest_Execute(t *testing.T) {
-	var upgrader = websocket.Upgrader{}
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
-		defer func() {
-			err := c.Close()
-			if err != nil {
-				return
-			}
-		}()
-
+		defer c.Close()
 		for {
 			mt, message, err := c.ReadMessage()
 			if err != nil {
@@ -111,27 +97,90 @@ func TestWebSocketRequest_Execute(t *testing.T) {
 			}
 		}
 	}))
-	defer ts.Close()
+	defer server.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
-
+	timeout := 5 * time.Second
+	wsURL := "ws" + server.URL[4:]
 	req := models.WebSocketRequest{
 		Name:        "Test WebSocket",
 		URL:         wsURL,
 		MessageType: "text",
 		Message:     "Hello, WebSocket!",
-		Timeout:     30 * time.Second,
+		Timeout:     &timeout,
 	}
 
-	env := &domain.Environment{
-		Variables: make(map[string]string),
+	resp, err := req.Execute(context.Background(), &domain.Environment{}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	wsResp, ok := resp.(*domain.WebSocketResponse)
+	require.True(t, ok)
+	assert.Len(t, wsResp.Messages, 1)
+	assert.Contains(t, wsResp.Messages[0], "Echo: Hello, WebSocket!")
+}
+
+func TestWebSocketRequest_MarshalUnmarshalJSON(t *testing.T) {
+	timeout := 5 * time.Second
+	req := &models.WebSocketRequest{
+		Name:        "Test WebSocket",
+		URL:         "ws://example.com/socket",
+		MessageType: "text",
+		Message:     "Hello, WebSocket!",
+		Timeout:     &timeout,
 	}
 
-	response, err := req.Execute(env)
-	assert.NoError(t, err)
-	assert.NotNil(t, response)
+	data, err := json.Marshal(req)
+	require.NoError(t, err)
 
-	wsResponse, ok := response.(*domain.WebSocketResponse)
-	assert.True(t, ok)
-	assert.Contains(t, wsResponse.Message, "Echo: Hello, WebSocket!")
+	var jsonMap map[string]interface{}
+	err = json.Unmarshal(data, &jsonMap)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Test WebSocket", jsonMap["name"])
+	assert.Equal(t, "ws://example.com/socket", jsonMap["url"])
+	assert.Equal(t, "text", jsonMap["messageType"])
+	assert.Equal(t, "Hello, WebSocket!", jsonMap["message"])
+	assert.Equal(t, "5s", jsonMap["timeout"])
+
+	var unmarshaled models.WebSocketRequest
+	err = json.Unmarshal(data, &unmarshaled)
+	require.NoError(t, err)
+
+	assert.Equal(t, req.Name, unmarshaled.Name)
+	assert.Equal(t, req.URL, unmarshaled.URL)
+	assert.Equal(t, req.MessageType, unmarshaled.MessageType)
+	assert.Equal(t, req.Message, unmarshaled.Message)
+	require.NotNil(t, unmarshaled.Timeout)
+	assert.Equal(t, *req.Timeout, *unmarshaled.Timeout)
+
+	reqNilTimeout := &models.WebSocketRequest{
+		Name:        "Test WebSocket No Timeout",
+		URL:         "ws://example.com/socket",
+		MessageType: "text",
+		Message:     "Hello, WebSocket!",
+	}
+
+	dataNilTimeout, err := json.Marshal(reqNilTimeout)
+	require.NoError(t, err)
+
+	var jsonMapNilTimeout map[string]interface{}
+	err = json.Unmarshal(dataNilTimeout, &jsonMapNilTimeout)
+	require.NoError(t, err)
+
+	assert.Equal(t, "Test WebSocket No Timeout", jsonMapNilTimeout["name"])
+	assert.Equal(t, "ws://example.com/socket", jsonMapNilTimeout["url"])
+	assert.Equal(t, "text", jsonMapNilTimeout["messageType"])
+	assert.Equal(t, "Hello, WebSocket!", jsonMapNilTimeout["message"])
+	_, timeoutExists := jsonMapNilTimeout["timeout"]
+	assert.False(t, timeoutExists)
+
+	var unmarshaledNilTimeout models.WebSocketRequest
+	err = json.Unmarshal(dataNilTimeout, &unmarshaledNilTimeout)
+	require.NoError(t, err)
+
+	assert.Equal(t, reqNilTimeout.Name, unmarshaledNilTimeout.Name)
+	assert.Equal(t, reqNilTimeout.URL, unmarshaledNilTimeout.URL)
+	assert.Equal(t, reqNilTimeout.MessageType, unmarshaledNilTimeout.MessageType)
+	assert.Equal(t, reqNilTimeout.Message, unmarshaledNilTimeout.Message)
+	assert.Nil(t, unmarshaledNilTimeout.Timeout)
 }

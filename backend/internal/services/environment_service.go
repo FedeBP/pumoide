@@ -68,6 +68,7 @@ func (s *EnvironmentService) UpdateEnvironment(id string, updatedEnvironment *do
 		return errors.NewAppError(http.StatusNotFound, constants.ErrEnvironmentNotFound, err)
 	}
 
+	existingEnvironment.ID = id
 	existingEnvironment.Name = updatedEnvironment.Name
 	existingEnvironment.Variables = updatedEnvironment.Variables
 

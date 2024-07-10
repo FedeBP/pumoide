@@ -1,15 +1,16 @@
 package models
 
 import (
-	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/FedeBP/pumoide/backend/internal/domain"
 	"github.com/FedeBP/pumoide/backend/internal/middleware"
+	"github.com/FedeBP/pumoide/backend/internal/utils"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	"github.com/FedeBP/pumoide/backend/pkg/errors"
 )
@@ -26,18 +27,46 @@ type RESTRequest struct {
 	QueryParams        map[string]string          `json:"queryParams,omitempty"`
 	DependsOn          []string                   `json:"dependsOn,omitempty"`
 	ExtractVariables   map[string]string          `json:"extractVariables,omitempty"`
-	Timeout            time.Duration              `json:"timeout,omitempty"`
+	Timeout            *time.Duration             `json:"-"`
 	ResponseValidation *domain.ResponseValidation `json:"responseValidation,omitempty"`
 }
 
-func (r *RESTRequest) Execute(env *domain.Environment) (domain.Response, error) {
-	client := &http.Client{
-		Timeout: r.Timeout,
+func (r *RESTRequest) Execute(ctx context.Context, env *domain.Environment, transport *http.Transport) (domain.Response, error) {
+	var client *http.Client
+	if r.Timeout == nil {
+		client = &http.Client{
+			Timeout:   0,
+			Transport: transport,
+		}
+	} else {
+		client = &http.Client{
+			Timeout:   *r.Timeout,
+			Transport: transport,
+		}
 	}
 
-	req, err := http.NewRequest(string(r.Method), r.URL, bytes.NewBufferString(r.Body))
+	req, err := r.createRequest(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	if err := r.applyAuthentication(req, env); err != nil {
+		return nil, err
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToExecuteRequest, err)
+	}
+	defer resp.Body.Close()
+
+	return r.processResponse(resp)
+}
+
+func (r *RESTRequest) createRequest(ctx context.Context) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, string(r.Method), r.URL, nil)
+	if err != nil {
+		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToCreateRequest, err)
 	}
 
 	for _, header := range r.Headers {
@@ -50,39 +79,38 @@ func (r *RESTRequest) Execute(env *domain.Environment) (domain.Response, error) 
 	}
 	req.URL.RawQuery = q.Encode()
 
-	if r.Auth != nil {
-		if r.Auth.Type == domain.AuthOAuth2 {
-			err = domain.RefreshOAuth2TokenIfNeeded(req, r.Auth)
-			if err != nil {
-				return nil, err
-			}
-		}
-		err = middleware.ApplyAuthentication(req, r.Auth, env)
-		if err != nil {
-			return nil, err
+	return req, nil
+}
+
+func (r *RESTRequest) applyAuthentication(req *http.Request, env *domain.Environment) error {
+	if r.Auth == nil {
+		return nil
+	}
+
+	if r.Auth.Type == domain.AuthOAuth2 {
+		if err := domain.RefreshOAuth2TokenIfNeeded(req, r.Auth); err != nil {
+			return errors.NewAppError(http.StatusInternalServerError, "Failed to refresh token", err)
 		}
 	}
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			return
-		}
-	}(resp.Body)
+	return middleware.ApplyAuthentication(req, r.Auth, env)
+}
 
+func (r *RESTRequest) processResponse(resp *http.Response) (domain.Response, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToReadResponse, err)
+	}
+
+	prettyBody, err := utils.PrettyJSON(string(body))
+	if err != nil {
+		prettyBody = string(body)
 	}
 
 	response := &domain.RESTResponse{
 		StatusCode: resp.StatusCode,
-		Headers:    convertHeaders(resp.Header),
-		Body:       string(body),
+		Headers:    utils.ConvertHeaders(resp.Header),
+		Body:       prettyBody,
 	}
 
 	if r.ResponseValidation != nil {
@@ -90,16 +118,6 @@ func (r *RESTRequest) Execute(env *domain.Environment) (domain.Response, error) 
 	}
 
 	return response, nil
-}
-
-func convertHeaders(httpHeaders http.Header) []domain.Header {
-	var headers []domain.Header
-	for key, values := range httpHeaders {
-		for _, value := range values {
-			headers = append(headers, domain.Header{Key: key, Value: value})
-		}
-	}
-	return headers
 }
 
 func (r *RESTRequest) Validate() error {
@@ -111,15 +129,12 @@ func (r *RESTRequest) Validate() error {
 		return errors.NewAppError(http.StatusMethodNotAllowed, fmt.Sprintf(constants.ErrInvalidHTTPMethod+": %s", r.Method), nil)
 	}
 
-	u, err := url.Parse(r.URL)
-	if err != nil || (u.Scheme == constants.EmptyString && u.Host == constants.EmptyString) {
-		return errors.NewAppError(http.StatusBadRequest, fmt.Sprintf(constants.ErrInvalidURL+": %s", r.URL), err)
+	if err := validateURL(r.URL); err != nil {
+		return err
 	}
 
-	for _, header := range r.Headers {
-		if header.Key == constants.EmptyString {
-			return errors.NewAppError(http.StatusBadRequest, constants.ErrEmptyHeaderKey, nil)
-		}
+	if err := validateHeaders(r.Headers); err != nil {
+		return err
 	}
 
 	if r.Auth != nil {
@@ -128,6 +143,41 @@ func (r *RESTRequest) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+func (r *RESTRequest) MarshalJSON() ([]byte, error) {
+	type Alias RESTRequest
+	aux := struct {
+		*Alias
+		Timeout string `json:"timeout,omitempty"`
+	}{
+		Alias: (*Alias)(r),
+	}
+	if r.Timeout != nil {
+		aux.Timeout = r.Timeout.String()
+	}
+	return json.Marshal(aux)
+}
+
+func (r *RESTRequest) UnmarshalJSON(data []byte) error {
+	type Alias RESTRequest
+	aux := struct {
+		*Alias
+		Timeout string `json:"timeout,omitempty"`
+	}{
+		Alias: (*Alias)(r),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if aux.Timeout != "" {
+		duration, err := time.ParseDuration(aux.Timeout)
+		if err != nil {
+			return err
+		}
+		r.Timeout = &duration
+	}
 	return nil
 }
 
@@ -175,7 +225,7 @@ func (r *RESTRequest) GetExtractVariables() map[string]string {
 	return r.ExtractVariables
 }
 
-func (r *RESTRequest) GetTimeout() time.Duration {
+func (r *RESTRequest) GetTimeout() *time.Duration {
 	return r.Timeout
 }
 
@@ -193,4 +243,8 @@ func (r *RESTRequest) GetBodyOrMessage() string {
 
 func (r *RESTRequest) SetBodyOrMessage(s string) {
 	r.Body = s
+}
+
+func (r *RESTRequest) GetContext() context.Context {
+	return context.Background()
 }

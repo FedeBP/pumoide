@@ -4,7 +4,7 @@ import "time"
 
 type Response interface {
 	Validate(*ResponseValidation) []string
-	GetBody() string
+	GetBody() interface{}
 	GetStatusCode() int
 	GetHeaders() []Header
 }
@@ -20,7 +20,7 @@ type RequestResult struct {
 	Request            Request            `json:"request"`
 	Response           Response           `json:"response"`
 	Error              string             `json:"error,omitempty"`
-	PerformanceMetrics PerformanceMetrics `json:"performance_metrics"`
+	PerformanceMetrics PerformanceMetrics `json:"performance_metrics,omitempty"`
 }
 
 type PerformanceMetrics struct {

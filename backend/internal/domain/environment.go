@@ -10,7 +10,7 @@ import (
 )
 
 type Environment struct {
-	ID        string            `json:"id"`
+	ID        string            `json:"id,omitempty"`
 	Name      string            `json:"name"`
 	Variables map[string]string `json:"variables"`
 }

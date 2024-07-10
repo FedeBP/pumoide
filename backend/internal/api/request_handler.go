@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/FedeBP/pumoide/backend/internal/domain"
-	"github.com/FedeBP/pumoide/backend/internal/factory"
 	"github.com/FedeBP/pumoide/backend/internal/services"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
 	customErrors "github.com/FedeBP/pumoide/backend/pkg/errors"
@@ -31,12 +30,7 @@ func (h *RequestHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadRequestBody, err, h.Logger)
 		return
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			return
-		}
-	}(r.Body)
+	defer r.Body.Close()
 
 	var requestDataList []map[string]interface{}
 	err = json.Unmarshal(body, &requestDataList)
@@ -52,30 +46,37 @@ func (h *RequestHandler) HandleRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	envID := r.URL.Query().Get(constants.Env)
-	requests := make([]domain.Request, len(requestDataList))
-	for i, requestData := range requestDataList {
-		request, err := factory.CreateRequest(requestData)
-		if err != nil {
-			customErrors.RespondWithError(w, http.StatusBadRequest, err.Error(), nil, h.Logger)
-			return
-		}
-		requests[i] = request
+	results, err := h.Service.ExecuteRequests(requestDataList, envID)
+	if err != nil && err.Error() == constants.ErrFailedAllRequests {
+		w.WriteHeader(http.StatusInternalServerError)
+	} else {
+		w.WriteHeader(http.StatusOK)
 	}
 
-	results, err := h.Service.ExecuteRequests(requests, envID)
+	w.Header().Set(constants.ContentType, constants.AppJson)
+
+	response := struct {
+		Results []domain.RequestResult `json:"results"`
+		Error   string                 `json:"error,omitempty"`
+	}{
+		Results: results,
+	}
+
 	if err != nil {
-		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToExecuteRequest, err, h.Logger)
-		return
+		response.Error = err.Error()
 	}
 
-	h.writeResponse(w, results)
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		h.Logger.Errorf(constants.ErrFailedToWriteResponse+": %v", err)
+	}
 }
 
 func (h *RequestHandler) writeResponse(w http.ResponseWriter, results []domain.RequestResult) {
 	w.Header().Set(constants.ContentType, constants.AppJson)
-	w.WriteHeader(http.StatusOK)
 
-	if err := json.NewEncoder(w).Encode(results); err != nil {
+	encoder := json.NewEncoder(w)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(results); err != nil {
 		h.Logger.Errorf(constants.ErrFailedToWriteResponse+": %v", err)
 	}
 }

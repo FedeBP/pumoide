@@ -30,7 +30,7 @@ type Config struct {
 	TLSHandshakeTimeout     time.Duration
 	ExpectContinueTimeout   time.Duration
 	DisableCompression      bool
-	DisableKeepAlives       bool
+	DisableKeepAlive        bool
 	MaxIdleConnsPerHost     int
 	ResponseHeaderTimeout   time.Duration
 }
@@ -57,7 +57,7 @@ func LoadConfig() *Config {
 		TLSHandshakeTimeout:     getEnvAsDuration("TLS_HANDSHAKE_TIMEOUT", 10*time.Second),
 		ExpectContinueTimeout:   getEnvAsDuration("EXPECT_CONTINUE_TIMEOUT", 1*time.Second),
 		DisableCompression:      getEnvAsBool("DISABLE_COMPRESSION", false),
-		DisableKeepAlives:       getEnvAsBool("DISABLE_KEEP_ALIVES", false),
+		DisableKeepAlive:        getEnvAsBool("DISABLE_KEEP_ALIVES", false),
 		MaxIdleConnsPerHost:     getEnvAsInt("MAX_IDLE_CONNS_PER_HOST", 0),
 		ResponseHeaderTimeout:   getEnvAsDuration("RESPONSE_HEADER_TIMEOUT", 0),
 	}

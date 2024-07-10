@@ -95,9 +95,13 @@ func (h *CollectionHandler) exportCollection(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		var appErr *customErrors.AppError
 		if errors.As(err, &appErr) {
+			if appErr.Code == http.StatusNoContent {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
 		} else {
-			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToLoadCollection, err, h.Logger)
+			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToReadResponse, err, h.Logger)
 		}
 		return
 	}
@@ -257,9 +261,6 @@ func (h *CollectionHandler) deleteCollection(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-	if _, err := w.Write([]byte(constants.CollectionDeletedSuccess)); err != nil {
-		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
-	}
 }
 
 func (h *CollectionHandler) deleteRequestFromCollection(w http.ResponseWriter, r *http.Request) {
@@ -276,7 +277,4 @@ func (h *CollectionHandler) deleteRequestFromCollection(w http.ResponseWriter, r
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-	if _, err := w.Write([]byte(constants.RequestDeletedSuccess)); err != nil {
-		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
-	}
 }

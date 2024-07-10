@@ -14,16 +14,21 @@ import (
 func ExtractValueFromResponse(response domain.Response, extractPath string) (string, error) {
 	body := response.GetBody()
 
+	bodyJSON, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal response body: %v", err)
+	}
+
 	if strings.HasPrefix(extractPath, "$") {
-		return extractJSONValue(body, extractPath)
+		return extractJSONValue(string(bodyJSON), extractPath)
 	} else {
-		return extractRegexValue(body, extractPath)
+		return extractRegexValue(string(bodyJSON), extractPath)
 	}
 }
 
-func extractJSONValue(responseBody string, jsonPath string) (string, error) {
+func extractJSONValue(jsonString string, jsonPath string) (string, error) {
 	var data interface{}
-	err := json.Unmarshal([]byte(responseBody), &data)
+	err := json.Unmarshal([]byte(jsonString), &data)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse JSON: %v", err)
 	}

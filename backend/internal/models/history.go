@@ -65,6 +65,9 @@ func (hm *History) GetEntry(id string) (*domain.HistoryEntry, error) {
 	filename := filepath.Join(hm.basePath, fmt.Sprintf("%s.json", id))
 	data, err := os.ReadFile(filename)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.NewAppError(http.StatusNoContent, "Entry not found", err)
+		}
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToReadResponse, err)
 	}
 

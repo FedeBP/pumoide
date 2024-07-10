@@ -128,7 +128,4 @@ func (h *EnvironmentHandler) deleteEnvironment(w http.ResponseWriter, r *http.Re
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-	if _, err := w.Write([]byte(constants.EnvironmentDeletedSuccess)); err != nil {
-		customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToWriteResponse, err, h.Logger)
-	}
 }

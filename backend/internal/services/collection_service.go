@@ -143,7 +143,7 @@ func (s *CollectionService) AddRequestToCollection(collectionID string, requestD
 func (s *CollectionService) DeleteRequestFromCollection(collectionID string, requestID string) error {
 	collection, err := models.LoadCollection(s.DefaultPath, collectionID)
 	if err != nil {
-		return errors.NewAppError(http.StatusNotFound, constants.ErrFailedToLoadCollection, err)
+		return errors.NewAppError(http.StatusNoContent, constants.ErrFailedToLoadCollection, err)
 	}
 
 	if !collection.RemoveRequest(requestID) {
@@ -161,7 +161,7 @@ func (s *CollectionService) ExportCollection(collectionID string) (*models.Expor
 	collection, err := models.LoadCollection(s.DefaultPath, collectionID)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.NewAppError(http.StatusNotFound, constants.ErrFailedToLoadCollection, err)
+			return nil, errors.NewAppError(http.StatusNoContent, constants.ErrFailedToLoadCollection, err)
 		}
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToLoadCollection, err)
 	}
