@@ -221,20 +221,17 @@ func (h *CollectionHandler) addRequestToCollection(w http.ResponseWriter, r *htt
 		customErrors.RespondWithError(w, http.StatusBadRequest, constants.ErrFailedToReadRequestBody, err, h.Logger)
 		return
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToCloseBody, err, h.Logger)
+	defer func() {
+		if closeErr := r.Body.Close(); closeErr != nil {
+			h.Logger.Errorf("Error closing request body: %v", closeErr)
 		}
-	}(r.Body)
+	}()
 
 	newRequest, err := h.Service.AddRequestToCollection(collectionID, body)
 	if err != nil {
 		var appErr *customErrors.AppError
 		if errors.As(err, &appErr) {
 			customErrors.RespondWithError(w, appErr.Code, appErr.Message, appErr.Err, h.Logger)
-		} else {
-			customErrors.RespondWithError(w, http.StatusInternalServerError, constants.ErrFailedToSaveRequest, err, h.Logger)
 		}
 		return
 	}

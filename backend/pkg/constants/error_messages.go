@@ -8,7 +8,6 @@ const (
 	ErrInvalidURL            = "Invalid URL"
 	ErrEmptyHeaderKey        = "Header key cannot be empty"
 	ErrFailedToCreateDir     = "Failed to create directory"
-	ErrFailedToSaveDir       = "Failed to save directory"
 	ErrFailedToWriteResponse = "Failed to write response"
 
 	// Collection errors
@@ -20,6 +19,8 @@ const (
 	ErrFailedToLoadCollection   = "Failed to load collection"
 	ErrFailedToSaveCollection   = "Failed to save collection"
 	ErrFailedToDeleteCollection = "Failed to delete collection"
+	ErrInvalidFolderPath        = "Invalid folder path"
+	ErrFolderNotFound           = "Folder not found"
 
 	// Environment errors
 	ErrEnvironmentIDRequired     = "Environment ID is required"
@@ -31,7 +32,7 @@ const (
 
 	// Request errors
 	ErrInvalidRequest          = "Invalid request"
-	ErrInvalidRequestAt        = "invalid request at index %d: %w"
+	ErrInvalidRequestAt        = "invalid request at index %s: %w"
 	ErrInvalidRequestBody      = "Invalid request body"
 	ErrRequestNotFound         = "Request not found"
 	ErrEmptyRequestName        = "Request name cannot be empty"
@@ -45,13 +46,13 @@ const (
 	ErrFailedToReadRequestBody = "Failed to read request body"
 	ErrFailedToDeleteRequest   = "Failed to delete request"
 	ErrEmptyGraphQLQuery       = "GraphQL query cannot be empty"
-	ErrInvalidGraphQLQuery     = "Invalid GraphQL query"
 
 	// History errors
-	ErrFailedToDeleteHistory = "Failed to delete history"
-	ErrFailedToAddHistory    = "Failed to add history entry"
-	ErrFailedToGetHistory    = "Failed to retrieve history entries"
-	ErrMissingHistoryEntryID = "Missing history entry ID"
+	ErrFailedToDeleteHistory  = "Failed to delete history"
+	ErrFailedToGetHistory     = "Failed to retrieve history entries"
+	ErrMissingHistoryEntryID  = "Missing history entry ID"
+	ErrFailedCreateHistoryDir = "Failed to create history directory"
+	ErrEntryNotFound          = "Entry not found"
 
 	// Authentication errors
 	ErrInvalidAuth          = "Invalid authentication: %s"
@@ -68,6 +69,7 @@ const (
 	ErrAuthAWS              = "AWS SigV4 auth requires %s"
 	ErrDigestAuth           = "Digest auth requires %s"
 	ErrUnsupportedType      = "Unsupported auth type: %s"
+	ErrRefreshToken         = "Failed to refresh token"
 
 	// Validation errors
 	ErrInvalidAssertionFormat = "Invalid assertion format. Expected at least 'path operator'"

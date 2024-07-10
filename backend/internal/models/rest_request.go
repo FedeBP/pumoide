@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"time"
 
@@ -61,9 +60,8 @@ func (r *RESTRequest) Execute(ctx context.Context, env *domain.Environment, tran
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
-			log.Printf("Error closing response body: %v", closeErr)
 			if err == nil {
-				err = errors.NewAppError(http.StatusInternalServerError, "Failed to close response body", closeErr)
+				err = errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToCloseBody, closeErr)
 			}
 		}
 	}()
@@ -97,7 +95,7 @@ func (r *RESTRequest) applyAuthentication(req *http.Request, env *domain.Environ
 
 	if r.Auth.Type == domain.AuthOAuth2 {
 		if err := domain.RefreshOAuth2TokenIfNeeded(req, r.Auth); err != nil {
-			return errors.NewAppError(http.StatusInternalServerError, "Failed to refresh token", err)
+			return errors.NewAppError(http.StatusInternalServerError, constants.ErrRefreshToken, err)
 		}
 	}
 

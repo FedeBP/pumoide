@@ -23,9 +23,4 @@ const (
 
 	// Other constants
 	Env = "env"
-
-	// Success messages
-	CollectionDeletedSuccess  = "Collection deleted successfully"
-	RequestDeletedSuccess     = "Request deleted successfully"
-	EnvironmentDeletedSuccess = "Environment deleted successfully"
 )

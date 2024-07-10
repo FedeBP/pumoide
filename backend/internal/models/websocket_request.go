@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -49,7 +48,6 @@ func (r *WebSocketRequest) Execute(ctx context.Context, env *domain.Environment,
 	}
 	defer func() {
 		if closeErr := conn.Close(); closeErr != nil {
-			log.Printf("Error closing WebSocket connection: %v", closeErr)
 			if err == nil {
 				err = errors.NewAppError(http.StatusInternalServerError, "Failed to close WebSocket connection", closeErr)
 			}
@@ -57,7 +55,7 @@ func (r *WebSocketRequest) Execute(ctx context.Context, env *domain.Environment,
 	}()
 
 	if err := conn.WriteMessage(websocket.TextMessage, []byte(r.Message)); err != nil {
-		return nil, errors.NewAppError(http.StatusInternalServerError, "Failed to send ws message", err)
+		return nil, errors.NewAppError(http.StatusInternalServerError, "Failed to send WebSocket message", err)
 	}
 
 	messages, err := r.readMessages(ctx, conn)
@@ -89,7 +87,7 @@ func (r *WebSocketRequest) applyAuthentication(header http.Header, env *domain.E
 
 	if r.Auth.Type == domain.AuthOAuth2 {
 		if err := domain.RefreshOAuth2TokenIfNeeded(dummyReq, r.Auth); err != nil {
-			return errors.NewAppError(http.StatusInternalServerError, "Failed to refresh token", err)
+			return errors.NewAppError(http.StatusInternalServerError, constants.ErrRefreshToken, err)
 		}
 	}
 
@@ -107,7 +105,7 @@ func (r *WebSocketRequest) establishConnection(ctx context.Context, dialer *webs
 
 	conn, _, err := dialer.DialContext(dialCtx, r.URL, header)
 	if err != nil {
-		return nil, errors.NewAppError(http.StatusInternalServerError, "Failed to establish ws connection", err)
+		return nil, errors.NewAppError(http.StatusInternalServerError, "Failed to establish WebSocket connection", err)
 	}
 
 	return conn, nil
@@ -130,7 +128,7 @@ func (r *WebSocketRequest) readMessages(ctx context.Context, conn *websocket.Con
 			_, message, err := conn.ReadMessage()
 			if err != nil {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					return nil, errors.NewAppError(http.StatusInternalServerError, "ws closed", err)
+					return nil, errors.NewAppError(http.StatusInternalServerError, "WebSocket closed", err)
 				}
 				return messages, nil
 			}

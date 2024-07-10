@@ -51,7 +51,9 @@ func (s *CollectionService) CreateCollection(collectionData []byte) (*models.Col
 		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrFailedToReadCollection, err)
 	}
 
-	collection.ID = uuid.New().String()
+	if collection.ID == constants.EmptyString {
+		collection.ID = uuid.New().String()
+	}
 
 	if err := collection.Save(s.DefaultPath); err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
@@ -73,7 +75,7 @@ func (s *CollectionService) UpdateCollection(id string, collectionData []byte) (
 
 	existingCollection.Name = updatedCollection.Name
 	existingCollection.Description = updatedCollection.Description
-	existingCollection.Requests = updatedCollection.Requests
+	existingCollection.Items = updatedCollection.Items
 
 	if err := existingCollection.Save(s.DefaultPath); err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
@@ -102,36 +104,38 @@ func (s *CollectionService) AddRequestToCollection(collectionID string, requestD
 		return nil, errors.NewAppError(http.StatusNotFound, constants.ErrFailedToLoadCollection, err)
 	}
 
-	var requestType struct {
-		Type string `json:"type"`
+	var requestInfo struct {
+		FolderPath []string        `json:"folderPath"`
+		Request    json.RawMessage `json:"request"`
 	}
-	if err := json.Unmarshal(requestData, &requestType); err != nil {
+	if err := json.Unmarshal(requestData, &requestInfo); err != nil {
 		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequestBody, err)
 	}
 
-	var newRequest domain.Request
-	switch requestType.Type {
-	case "rest":
-		newRequest = &models.RESTRequest{}
-	case "websocket":
-		newRequest = &models.WebSocketRequest{}
-	default:
-		return nil, errors.NewAppError(http.StatusBadRequest, "Unknown request type", nil)
-	}
-
-	if err := json.Unmarshal(requestData, newRequest); err != nil {
-		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequestBody, err)
-	}
-
-	if err := newRequest.Validate(); err != nil {
+	newRequest, err := models.CreateRequestFromJSON(requestInfo.Request)
+	if err != nil {
 		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequest, err)
 	}
 
-	if newRequest.GetID() == "" {
-		newRequest.SetID(uuid.New().String())
+	targetItems := &collection.Items
+	for _, folderName := range requestInfo.FolderPath {
+		found := false
+		for i, item := range *targetItems {
+			if item.Folder != nil && item.Name == folderName {
+				targetItems = &(*targetItems)[i].Folder.Items
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, errors.NewAppError(http.StatusNotFound, constants.ErrFolderNotFound, nil)
+		}
 	}
 
-	collection.Requests = append(collection.Requests, newRequest)
+	*targetItems = append(*targetItems, models.Item{
+		Name:    newRequest.GetName(),
+		Request: requestInfo.Request,
+	})
 
 	if err := collection.Save(s.DefaultPath); err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
@@ -143,10 +147,34 @@ func (s *CollectionService) AddRequestToCollection(collectionID string, requestD
 func (s *CollectionService) DeleteRequestFromCollection(collectionID string, requestID string) error {
 	collection, err := models.LoadCollection(s.DefaultPath, collectionID)
 	if err != nil {
-		return errors.NewAppError(http.StatusNoContent, constants.ErrFailedToLoadCollection, err)
+		return errors.NewAppError(http.StatusNotFound, constants.ErrFailedToLoadCollection, err)
 	}
 
-	if !collection.RemoveRequest(requestID) {
+	deleted := false
+	var removeRequestFromItems func(*[]models.Item) bool
+	removeRequestFromItems = func(items *[]models.Item) bool {
+		for i, item := range *items {
+			if item.Request != nil {
+				var req struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(item.Request, &req); err == nil && req.ID == requestID {
+					*items = append((*items)[:i], (*items)[i+1:]...)
+					return true
+				}
+			}
+			if item.Folder != nil {
+				if removeRequestFromItems(&item.Folder.Items) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
+	deleted = removeRequestFromItems(&collection.Items)
+
+	if !deleted {
 		return errors.NewAppError(http.StatusNotFound, constants.ErrRequestNotFound, nil)
 	}
 

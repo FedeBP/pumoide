@@ -1,11 +1,11 @@
-package factory
+package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/FedeBP/pumoide/backend/internal/domain"
-	"github.com/FedeBP/pumoide/backend/internal/models"
 )
 
 func CreateRequest(data map[string]interface{}) (domain.Request, error) {
@@ -35,8 +35,35 @@ func CreateRequest(data map[string]interface{}) (domain.Request, error) {
 	return req, nil
 }
 
-func createRESTRequest(data map[string]interface{}) (*models.RESTRequest, error) {
-	req := &models.RESTRequest{
+func CreateRequestFromJSON(data []byte) (domain.Request, error) {
+	var baseRequest struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &baseRequest); err != nil {
+		return nil, err
+	}
+
+	var request domain.Request
+	switch domain.RequestType(baseRequest.Type) {
+	case domain.RequestTypeREST:
+		request = &RESTRequest{}
+	case domain.RequestTypeWebSocket:
+		request = &WebSocketRequest{}
+	case domain.RequestTypeGraphQL:
+		request = &GraphQLRequest{}
+	default:
+		return nil, fmt.Errorf("unknown request type: %s", baseRequest.Type)
+	}
+
+	if err := json.Unmarshal(data, request); err != nil {
+		return nil, err
+	}
+
+	return request, nil
+}
+
+func createRESTRequest(data map[string]interface{}) (*RESTRequest, error) {
+	req := &RESTRequest{
 		Type: domain.RequestTypeREST,
 	}
 
@@ -96,8 +123,8 @@ func createRESTRequest(data map[string]interface{}) (*models.RESTRequest, error)
 	return req, nil
 }
 
-func createWebSocketRequest(data map[string]interface{}) (*models.WebSocketRequest, error) {
-	req := &models.WebSocketRequest{
+func createWebSocketRequest(data map[string]interface{}) (*WebSocketRequest, error) {
+	req := &WebSocketRequest{
 		Type: domain.RequestTypeWebSocket,
 	}
 
@@ -159,8 +186,8 @@ func createWebSocketRequest(data map[string]interface{}) (*models.WebSocketReque
 	return req, nil
 }
 
-func createGraphQLRequest(data map[string]interface{}) (*models.GraphQLRequest, error) {
-	req := &models.GraphQLRequest{
+func createGraphQLRequest(data map[string]interface{}) (*GraphQLRequest, error) {
+	req := &GraphQLRequest{
 		Type: domain.RequestTypeGraphQL,
 	}
 

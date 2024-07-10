@@ -14,54 +14,65 @@ import (
 )
 
 type Collection struct {
-	ID          string           `json:"id"`
-	Name        string           `json:"name"`
-	Description string           `json:"description"`
-	Requests    []domain.Request `json:"requests"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Items       []Item `json:"items"`
 }
 
-type ImportedCollection struct {
-	Info struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-	} `json:"info"`
-	Item []struct {
-		Name    string `json:"name"`
-		Request struct {
-			Method string          `json:"method"`
-			URL    string          `json:"url"`
-			Header []domain.Header `json:"header"`
-			Body   struct {
-				Mode string `json:"mode"`
-				Raw  string `json:"raw"`
-			} `json:"body"`
-			GraphQL *struct {
-				Query     string                 `json:"query"`
-				Variables map[string]interface{} `json:"variables"`
-			} `json:"graphql,omitempty"`
-		} `json:"request"`
-	} `json:"item"`
+type Item struct {
+	ID      string          `json:"id"`
+	Name    string          `json:"name"`
+	Request json.RawMessage `json:"request,omitempty"`
+	Folder  *Folder         `json:"folder,omitempty"`
 }
 
-type ExportedCollection struct {
-	Info struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		Schema      string `json:"schema"`
-	} `json:"info"`
-	Item []struct {
-		Name    string `json:"name"`
-		Request struct {
-			Method  string            `json:"method"`
-			URL     string            `json:"url"`
-			Header  []domain.Header   `json:"header"`
-			Body    map[string]string `json:"body,omitempty"`
-			GraphQL *struct {
-				Query     string                 `json:"query"`
-				Variables map[string]interface{} `json:"variables"`
-			} `json:"graphql,omitempty"`
-		} `json:"request"`
-	} `json:"item"`
+type Folder struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Items []Item `json:"items"`
+}
+
+func (c *Collection) UnmarshalJSON(data []byte) error {
+	type Alias Collection
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(c),
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	for i, item := range c.Items {
+		if item.Request != nil {
+			req, err := CreateRequestFromJSON(item.Request)
+			if err != nil {
+				return err
+			}
+			c.Items[i].Request, err = json.Marshal(req)
+			if err != nil {
+				return err
+			}
+		}
+		if item.Folder != nil {
+			for j, subItem := range item.Folder.Items {
+				if subItem.Request != nil {
+					req, err := CreateRequestFromJSON(subItem.Request)
+					if err != nil {
+						return err
+					}
+					c.Items[i].Folder.Items[j].Request, err = json.Marshal(req)
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (c *Collection) Save(path string) error {
@@ -73,17 +84,138 @@ func (c *Collection) Save(path string) error {
 		c.ID = uuid.New().String()
 	}
 
-	for _, req := range c.Requests {
-		if req.GetID() == constants.EmptyString {
-			req.SetID(uuid.New().String())
-		}
-	}
+	c.generateIDs()
 
 	data, err := json.Marshal(c)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(filepath.Join(path, c.ID+".json"), data, 0644)
+}
+
+func (c *Collection) generateIDs() {
+	for i := range c.Items {
+		c.generateItemID(&c.Items[i])
+	}
+}
+
+func (c *Collection) generateItemID(item *Item) {
+	if item.ID == constants.EmptyString {
+		item.ID = uuid.New().String()
+	}
+	if item.Folder != nil {
+		if item.Folder.ID == constants.EmptyString {
+			item.Folder.ID = uuid.New().String()
+		}
+		for i := range item.Folder.Items {
+			c.generateItemID(&item.Folder.Items[i])
+		}
+	}
+}
+
+func (c *Collection) Validate() error {
+	if c.Name == constants.EmptyString {
+		return fmt.Errorf(constants.ErrEmptyCollectionName)
+	}
+
+	return c.validateItems(c.Items)
+}
+
+func (c *Collection) validateItems(items []Item) error {
+	for _, item := range items {
+		if item.Request != nil {
+			req, err := CreateRequestFromJSON(item.Request)
+			if err != nil {
+				return fmt.Errorf(constants.ErrInvalidRequestAt, item.ID, err)
+			}
+			if err := req.Validate(); err != nil {
+				return fmt.Errorf(constants.ErrInvalidRequestAt, item.ID, err)
+			}
+		}
+		if item.Folder != nil {
+			if err := c.validateItems(item.Folder.Items); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *Collection) AddRequest(request domain.Request, folderPath ...string) error {
+	if err := request.Validate(); err != nil {
+		return errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequest, err)
+	}
+
+	requestJSON, err := json.Marshal(request)
+	if err != nil {
+		return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToEncodeRequest, err)
+	}
+
+	newItem := Item{
+		ID:      uuid.New().String(),
+		Name:    request.GetName(),
+		Request: requestJSON,
+	}
+
+	if len(folderPath) == 0 {
+		c.Items = append(c.Items, newItem)
+	} else {
+		if err := c.addItemToFolder(newItem, c.Items, folderPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Collection) addItemToFolder(item Item, items []Item, folderPath []string) error {
+	if len(folderPath) == 0 {
+		return errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidFolderPath, nil)
+	}
+
+	for i, existingItem := range items {
+		if existingItem.Folder != nil && existingItem.Folder.Name == folderPath[0] {
+			if len(folderPath) == 1 {
+				items[i].Folder.Items = append(items[i].Folder.Items, item)
+				return nil
+			}
+			return c.addItemToFolder(item, existingItem.Folder.Items, folderPath[1:])
+		}
+	}
+
+	return errors.NewAppError(http.StatusNotFound, constants.ErrFolderNotFound, nil)
+}
+
+func (c *Collection) RemoveRequest(requestID string) bool {
+	return c.removeRequestFromItems(requestID, c.Items)
+}
+
+func (c *Collection) removeRequestFromItems(requestID string, items []Item) bool {
+	for i, item := range items {
+		if item.Request != nil {
+			var req struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal(item.Request, &req); err == nil && req.ID == requestID {
+				items = append(items[:i], items[i+1:]...)
+				return true
+			}
+		}
+		if item.Folder != nil {
+			if c.removeRequestFromItems(requestID, item.Folder.Items) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (i *Item) GetRequest() (domain.Request, error) {
+	if i.Request == nil {
+		return nil, nil
+	}
+
+	return CreateRequestFromJSON(i.Request)
 }
 
 func LoadCollection(path string, id string) (*Collection, error) {
@@ -94,208 +226,4 @@ func LoadCollection(path string, id string) (*Collection, error) {
 	var collection Collection
 	err = json.Unmarshal(data, &collection)
 	return &collection, err
-}
-
-func (c *Collection) AddRequest(request domain.Request) error {
-	if err := request.Validate(); err != nil {
-		return errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequest, err)
-	}
-
-	if request.GetID() == constants.EmptyString {
-		request.SetID(uuid.New().String())
-	}
-	c.Requests = append(c.Requests, request)
-	return nil
-}
-
-func (c *Collection) RemoveRequest(requestID string) bool {
-	for i, req := range c.Requests {
-		if req.GetID() == requestID {
-			c.Requests = append(c.Requests[:i], c.Requests[i+1:]...)
-			return true
-		}
-	}
-	return false
-}
-
-func (c *Collection) ToExportedCollection() ExportedCollection {
-	exported := ExportedCollection{}
-	exported.Info.Name = c.Name
-	exported.Info.Description = c.Description
-	exported.Info.Schema = "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-
-	for _, req := range c.Requests {
-		item := struct {
-			Name    string `json:"name"`
-			Request struct {
-				Method  string            `json:"method"`
-				URL     string            `json:"url"`
-				Header  []domain.Header   `json:"header"`
-				Body    map[string]string `json:"body,omitempty"`
-				GraphQL *struct {
-					Query     string                 `json:"query"`
-					Variables map[string]interface{} `json:"variables"`
-				} `json:"graphql,omitempty"`
-			} `json:"request"`
-		}{
-			Name: req.GetName(),
-		}
-
-		switch r := req.(type) {
-		case *RESTRequest:
-			item.Request.Method = string(r.Method)
-			item.Request.URL = r.URL
-			item.Request.Header = r.GetHeaders()
-			item.Request.Body = map[string]string{
-				"mode": "raw",
-				"raw":  r.Body,
-			}
-		case *WebSocketRequest:
-			item.Request.Method = "websocket"
-			item.Request.URL = r.URL
-			for _, header := range r.Headers {
-				item.Request.Header = append(item.Request.Header, domain.Header{Key: header.Key, Value: header.Value})
-			}
-			item.Request.Body = map[string]string{
-				"mode": "raw",
-				"raw":  r.Message,
-			}
-		case *GraphQLRequest:
-			item.Request.Method = "POST"
-			item.Request.URL = r.URL
-			item.Request.Header = r.GetHeaders()
-			item.Request.GraphQL = &struct {
-				Query     string                 `json:"query"`
-				Variables map[string]interface{} `json:"variables"`
-			}{
-				Query:     r.Query,
-				Variables: r.Variables,
-			}
-		}
-
-		exported.Item = append(exported.Item, item)
-	}
-
-	return exported
-}
-
-func NewCollectionFromImported(imported ImportedCollection) (*Collection, error) {
-	newCollection := &Collection{
-		ID:          uuid.New().String(),
-		Name:        imported.Info.Name,
-		Description: imported.Info.Description,
-	}
-
-	for _, item := range imported.Item {
-		var newRequest domain.Request
-
-		if item.Request.GraphQL != nil {
-			graphqlReq := &GraphQLRequest{
-				ID:        uuid.New().String(),
-				Name:      item.Name,
-				Type:      domain.RequestTypeGraphQL,
-				URL:       item.Request.URL,
-				Query:     item.Request.GraphQL.Query,
-				Variables: item.Request.GraphQL.Variables,
-			}
-			for _, header := range item.Request.Header {
-				graphqlReq.Headers = append(graphqlReq.Headers, domain.Header{Key: header.Key, Value: header.Value})
-			}
-			newRequest = graphqlReq
-		} else if item.Request.Method == "websocket" {
-			wsReq := &WebSocketRequest{
-				ID:          uuid.New().String(),
-				Name:        item.Name,
-				URL:         item.Request.URL,
-				MessageType: "text",
-				Message:     item.Request.Body.Raw,
-			}
-			for _, header := range item.Request.Header {
-				wsReq.Headers = append(wsReq.Headers, domain.Header{Key: header.Key, Value: header.Value})
-			}
-			newRequest = wsReq
-		} else {
-			restReq := &RESTRequest{
-				ID:      uuid.New().String(),
-				Name:    item.Name,
-				Headers: item.Request.Header,
-				Method:  domain.Method(item.Request.Method),
-				URL:     item.Request.URL,
-			}
-			if item.Request.Body.Mode == "raw" {
-				restReq.Body = item.Request.Body.Raw
-			}
-			newRequest = restReq
-		}
-
-		if err := newRequest.Validate(); err != nil {
-			return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequestAt, err)
-		}
-
-		newCollection.Requests = append(newCollection.Requests, newRequest)
-	}
-
-	if err := newCollection.Validate(); err != nil {
-		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidCollection, err)
-	}
-
-	return newCollection, nil
-}
-
-func (c *Collection) Validate() error {
-	if c.Name == constants.EmptyString {
-		return fmt.Errorf(constants.ErrEmptyCollectionName)
-	}
-
-	for i, req := range c.Requests {
-		if err := req.Validate(); err != nil {
-			return fmt.Errorf(constants.ErrInvalidRequestAt, i, err)
-		}
-	}
-
-	return nil
-}
-
-func (c *Collection) UnmarshalJSON(data []byte) error {
-	type Alias Collection
-	aux := &struct {
-		Requests []json.RawMessage `json:"requests"`
-		*Alias
-	}{
-		Alias: (*Alias)(c),
-	}
-
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-
-	c.Requests = make([]domain.Request, len(aux.Requests))
-	for i, raw := range aux.Requests {
-		var requestType struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(raw, &requestType); err != nil {
-			return err
-		}
-
-		var request domain.Request
-		switch requestType.Type {
-		case "rest":
-			request = &RESTRequest{}
-		case "websocket":
-			request = &WebSocketRequest{}
-		case "graphql":
-			request = &GraphQLRequest{}
-		default:
-			return fmt.Errorf("unknown request type: %s", requestType.Type)
-		}
-
-		if err := json.Unmarshal(raw, request); err != nil {
-			return err
-		}
-
-		c.Requests[i] = request
-	}
-
-	return nil
 }

@@ -39,7 +39,7 @@ func (hm *History) AddEntry(entry domain.HistoryEntry) error {
 
 	err := os.MkdirAll(hm.basePath, 0755)
 	if err != nil {
-		return errors.NewAppError(http.StatusInternalServerError, "Failed to create history directory", err)
+		return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedCreateHistoryDir, err)
 	}
 
 	filename := filepath.Join(hm.basePath, fmt.Sprintf("%s.json", entry.ID))
@@ -66,7 +66,7 @@ func (hm *History) GetEntry(id string) (*domain.HistoryEntry, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.NewAppError(http.StatusNoContent, "Entry not found", err)
+			return nil, errors.NewAppError(http.StatusNoContent, constants.ErrEntryNotFound, err)
 		}
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToReadResponse, err)
 	}

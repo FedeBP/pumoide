@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/FedeBP/pumoide/backend/internal/domain"
-	"github.com/FedeBP/pumoide/backend/internal/factory"
 	"github.com/FedeBP/pumoide/backend/internal/models"
 	"github.com/FedeBP/pumoide/backend/internal/utils"
 	"github.com/FedeBP/pumoide/backend/pkg/constants"
@@ -42,7 +41,7 @@ func (s *RequestService) ExecuteRequests(requestDataList []map[string]interface{
 	allFailed := true
 
 	for i, requestData := range requestDataList {
-		request, err := factory.CreateRequest(requestData)
+		request, err := models.CreateRequest(requestData)
 		if err != nil {
 			s.Logger.Errorf("Failed to create request: %v", err)
 			results[i] = domain.RequestResult{Error: err.Error()}
