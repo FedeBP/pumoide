@@ -258,9 +258,6 @@ func TestCollectionService(t *testing.T) {
 		require.NotNil(t, newFolder, "New Folder not found")
 		require.Len(t, newFolder.Item, 1, "New Folder should contain 1 item")
 		assert.Equal(t, "New Request", newFolder.Item[0].Name)
-
-		exportedJSON, _ := json.MarshalIndent(exportedCollection, "", "  ")
-		t.Logf("Exported Collection: %s", string(exportedJSON))
 	})
 
 	t.Run("DeleteCollection", func(t *testing.T) {
