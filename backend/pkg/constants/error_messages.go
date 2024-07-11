@@ -21,6 +21,8 @@ const (
 	ErrFailedToDeleteCollection = "Failed to delete collection"
 	ErrInvalidFolderPath        = "Invalid folder path"
 	ErrFolderNotFound           = "Folder not found"
+	ErrFailedToDeleteFolder     = "Failed to delete folder"
+	ErrFailedToExportCollection = "Failed to export collection"
 
 	// Environment errors
 	ErrEnvironmentIDRequired     = "Environment ID is required"
@@ -34,8 +36,7 @@ const (
 	ErrInvalidRequest          = "Invalid request"
 	ErrInvalidRequestAt        = "invalid request at index %s: %w"
 	ErrInvalidRequestBody      = "Invalid request body"
-	ErrRequestNotFound         = "Request not found"
-	ErrEmptyRequestName        = "Request name cannot be empty"
+	ErrRequestNotFound         = "ImportedRequest not found"
 	ErrFailedToSaveRequest     = "Failed to save request"
 	ErrFailedToEncodeRequest   = "Failed to encode request"
 	ErrFailedToExecuteRequest  = "Failed to execute request"

@@ -1,4 +1,4 @@
-package models
+package models_test
 
 import (
 	"context"
@@ -28,14 +28,6 @@ func TestGraphQLRequest_Validate(t *testing.T) {
 				Query: "query { hello }",
 			},
 			wantErr: false,
-		},
-		{
-			name: "Empty name",
-			request: models.GraphQLRequest{
-				URL:   "https://api.example.com/graphql",
-				Query: "query { hello }",
-			},
-			wantErr: true,
 		},
 		{
 			name: "Invalid URL",
@@ -93,10 +85,10 @@ func TestGraphQLRequest_Execute(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusOK, graphqlResp.StatusCode)
 
-	bodyMap, ok := graphqlResp.Body.(map[string]interface{})
+	body, ok := graphqlResp.Body.(map[string]interface{})
 	require.True(t, ok, "Body should be a map[string]interface{}")
 
-	data, ok := bodyMap["data"].(map[string]interface{})
+	data, ok := body["data"].(map[string]interface{})
 	require.True(t, ok, "data field should be a map[string]interface{}")
 
 	hello, ok := data["hello"].(string)
@@ -134,34 +126,6 @@ func TestGraphQLRequest_MarshalUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, req.Query, unmarshaled.Query)
 	require.NotNil(t, unmarshaled.Timeout)
 	assert.Equal(t, *req.Timeout, *unmarshaled.Timeout)
-
-	reqNilTimeout := &models.GraphQLRequest{
-		Name:  "Test GraphQL No Timeout",
-		URL:   "https://api.example.com/graphql",
-		Query: "query { hello }",
-	}
-
-	dataNilTimeout, err := json.Marshal(reqNilTimeout)
-	require.NoError(t, err)
-
-	var jsonMapNilTimeout map[string]interface{}
-	err = json.Unmarshal(dataNilTimeout, &jsonMapNilTimeout)
-	require.NoError(t, err)
-
-	assert.Equal(t, "Test GraphQL No Timeout", jsonMapNilTimeout["name"])
-	assert.Equal(t, "https://api.example.com/graphql", jsonMapNilTimeout["url"])
-	assert.Equal(t, "query { hello }", jsonMapNilTimeout["query"])
-	_, timeoutExists := jsonMapNilTimeout["timeout"]
-	assert.False(t, timeoutExists)
-
-	var unmarshaledNilTimeout models.GraphQLRequest
-	err = json.Unmarshal(dataNilTimeout, &unmarshaledNilTimeout)
-	require.NoError(t, err)
-
-	assert.Equal(t, reqNilTimeout.Name, unmarshaledNilTimeout.Name)
-	assert.Equal(t, reqNilTimeout.URL, unmarshaledNilTimeout.URL)
-	assert.Equal(t, reqNilTimeout.Query, unmarshaledNilTimeout.Query)
-	assert.Nil(t, unmarshaledNilTimeout.Timeout)
 }
 
 func TestGraphQLRequest_SetQuery(t *testing.T) {

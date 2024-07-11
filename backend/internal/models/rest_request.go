@@ -21,9 +21,9 @@ type RESTRequest struct {
 	Type               domain.RequestType         `json:"type"`
 	Method             domain.Method              `json:"method"`
 	URL                string                     `json:"url"`
-	Body               string                     `json:"body,omitempty"`
+	Body               json.RawMessage            `json:"body,omitempty"`
 	Auth               *domain.Auth               `json:"auth,omitempty"`
-	Headers            []domain.Header            `json:"headers,omitempty"`
+	Headers            []domain.Header            `json:"header,omitempty"`
 	QueryParams        map[string]string          `json:"queryParams,omitempty"`
 	DependsOn          []string                   `json:"dependsOn,omitempty"`
 	ExtractVariables   map[string]string          `json:"extractVariables,omitempty"`
@@ -127,16 +127,12 @@ func (r *RESTRequest) processResponse(resp *http.Response) (domain.Response, err
 }
 
 func (r *RESTRequest) Validate() error {
-	if r.Name == constants.EmptyString {
-		return errors.NewAppError(http.StatusBadRequest, constants.ErrEmptyRequestName, nil)
+	if err := validateURL(r.URL); err != nil {
+		return err
 	}
 
 	if !r.Method.Validate() {
 		return errors.NewAppError(http.StatusMethodNotAllowed, fmt.Sprintf(constants.ErrInvalidHTTPMethod+": %s", r.Method), nil)
-	}
-
-	if err := validateURL(r.URL); err != nil {
-		return err
 	}
 
 	if err := validateHeaders(r.Headers); err != nil {
@@ -230,10 +226,10 @@ func (r *RESTRequest) SetURL(url string) {
 	r.URL = url
 }
 func (r *RESTRequest) GetBodyOrMessage() string {
-	return r.Body
+	return string(r.Body)
 }
 func (r *RESTRequest) SetBodyOrMessage(s string) {
-	r.Body = s
+	r.Body = json.RawMessage(s)
 }
 func (r *RESTRequest) GetContext() context.Context {
 	return context.Background()

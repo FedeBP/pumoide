@@ -91,7 +91,7 @@ func (s *RequestService) executeRequest(req domain.Request, env *domain.Environm
 
 			resultID := result.Request.GetID()
 			if resultID == constants.EmptyString {
-				s.Logger.Warnf("Request in results doesn't have an ID. Can't match dependency: %s", depID)
+				s.Logger.Warnf("ImportedRequest in results doesn't have an ID. Can't match dependency: %s", depID)
 				continue
 			}
 

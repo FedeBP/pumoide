@@ -7,7 +7,6 @@ const (
 	// Action constants
 	Action                 = "action"
 	ActionExport           = "export"
-	ActionImport           = "import"
 	ActionAddRequest       = "addRequest"
 	ActionUpdateCollection = "updateCollection"
 	ActionDeleteCollection = "deleteCollection"
@@ -15,6 +14,8 @@ const (
 	ActionEntry            = "getEntry"
 	ActionDeleteEntry      = "deleteEntry"
 	ActionClearHistory     = "clearHistory"
+	ActionAddFolder        = "addFolder"
+	ActionDeleteFolder     = "deleteFolder"
 
 	// ID constants
 	CollectionID = "collectionId"

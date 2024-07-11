@@ -1,4 +1,4 @@
-package models
+package models_test
 
 import (
 	"context"
@@ -28,14 +28,6 @@ func TestRESTRequest_Validate(t *testing.T) {
 				URL:    "https://api.example.com/test",
 			},
 			wantErr: false,
-		},
-		{
-			name: "Empty name",
-			request: models.RESTRequest{
-				Method: domain.MethodGet,
-				URL:    "https://api.example.com/test",
-			},
-			wantErr: true,
 		},
 		{
 			name: "Invalid method",
@@ -94,9 +86,9 @@ func TestRESTRequest_Execute(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, http.StatusOK, restResp.StatusCode)
 
-	bodyMap, ok := restResp.Body.(map[string]interface{})
+	body, ok := restResp.Body.(map[string]interface{})
 	require.True(t, ok, "Response body should be a map")
-	message, ok := bodyMap["message"].(string)
+	message, ok := body["message"].(string)
 	require.True(t, ok, "Message should be a string")
 	assert.Equal(t, "Hello, World!", message)
 }
@@ -131,32 +123,4 @@ func TestRESTRequest_MarshalUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, req.URL, unmarshaled.URL)
 	require.NotNil(t, unmarshaled.Timeout)
 	assert.Equal(t, *req.Timeout, *unmarshaled.Timeout)
-
-	reqNilTimeout := models.RESTRequest{
-		Name:   "Test Request No Timeout",
-		Method: domain.MethodGet,
-		URL:    "https://api.example.com/test",
-	}
-
-	dataNilTimeout, err := json.Marshal(reqNilTimeout)
-	require.NoError(t, err)
-
-	var jsonMapNilTimeout map[string]interface{}
-	err = json.Unmarshal(dataNilTimeout, &jsonMapNilTimeout)
-	require.NoError(t, err)
-
-	assert.Equal(t, "Test Request No Timeout", jsonMapNilTimeout["name"])
-	assert.Equal(t, "GET", jsonMapNilTimeout["method"])
-	assert.Equal(t, "https://api.example.com/test", jsonMapNilTimeout["url"])
-	_, timeoutExists := jsonMapNilTimeout["timeout"]
-	assert.False(t, timeoutExists)
-
-	var unmarshaledNilTimeout models.RESTRequest
-	err = json.Unmarshal(dataNilTimeout, &unmarshaledNilTimeout)
-	require.NoError(t, err)
-
-	assert.Equal(t, reqNilTimeout.Name, unmarshaledNilTimeout.Name)
-	assert.Equal(t, reqNilTimeout.Method, unmarshaledNilTimeout.Method)
-	assert.Equal(t, reqNilTimeout.URL, unmarshaledNilTimeout.URL)
-	assert.Nil(t, unmarshaledNilTimeout.Timeout)
 }

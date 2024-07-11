@@ -14,23 +14,19 @@ import (
 )
 
 type Collection struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Items       []Item `json:"items"`
+	ID   string `json:"id,omitempty"`
+	Info struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	} `json:"info"`
+	Item []Item `json:"item"`
 }
 
 type Item struct {
-	ID      string          `json:"id"`
+	ID      string          `json:"id,omitempty"`
 	Name    string          `json:"name"`
 	Request json.RawMessage `json:"request,omitempty"`
-	Folder  *Folder         `json:"folder,omitempty"`
-}
-
-type Folder struct {
-	ID    string `json:"id"`
-	Name  string `json:"name"`
-	Items []Item `json:"items"`
+	Item    []Item          `json:"item,omitempty"`
 }
 
 func (c *Collection) UnmarshalJSON(data []byte) error {
@@ -45,33 +41,28 @@ func (c *Collection) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	for i, item := range c.Items {
+	return c.processItems(&c.Item)
+}
+
+func (c *Collection) processItems(items *[]Item) error {
+	for i := range *items {
+		item := &(*items)[i]
 		if item.Request != nil {
-			req, err := CreateRequestFromJSON(item.Request)
+			req, err := CreateRequestFromJSON(item.Name, item.Request)
 			if err != nil {
 				return err
 			}
-			c.Items[i].Request, err = json.Marshal(req)
+			item.Request, err = json.Marshal(req)
 			if err != nil {
 				return err
 			}
 		}
-		if item.Folder != nil {
-			for j, subItem := range item.Folder.Items {
-				if subItem.Request != nil {
-					req, err := CreateRequestFromJSON(subItem.Request)
-					if err != nil {
-						return err
-					}
-					c.Items[i].Folder.Items[j].Request, err = json.Marshal(req)
-					if err != nil {
-						return err
-					}
-				}
+		if len(item.Item) > 0 {
+			if err := c.processItems(&item.Item); err != nil {
+				return err
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -94,37 +85,33 @@ func (c *Collection) Save(path string) error {
 }
 
 func (c *Collection) generateIDs() {
-	for i := range c.Items {
-		c.generateItemID(&c.Items[i])
-	}
+	c.generateItemIDs(&c.Item)
 }
 
-func (c *Collection) generateItemID(item *Item) {
-	if item.ID == constants.EmptyString {
-		item.ID = uuid.New().String()
-	}
-	if item.Folder != nil {
-		if item.Folder.ID == constants.EmptyString {
-			item.Folder.ID = uuid.New().String()
+func (c *Collection) generateItemIDs(items *[]Item) {
+	for i := range *items {
+		item := &(*items)[i]
+		if item.ID == constants.EmptyString {
+			item.ID = uuid.New().String()
 		}
-		for i := range item.Folder.Items {
-			c.generateItemID(&item.Folder.Items[i])
+		if len(item.Item) > 0 {
+			c.generateItemIDs(&item.Item)
 		}
 	}
 }
 
 func (c *Collection) Validate() error {
-	if c.Name == constants.EmptyString {
+	if c.Info.Name == constants.EmptyString {
 		return fmt.Errorf(constants.ErrEmptyCollectionName)
 	}
 
-	return c.validateItems(c.Items)
+	return c.validateItems(c.Item)
 }
 
 func (c *Collection) validateItems(items []Item) error {
 	for _, item := range items {
 		if item.Request != nil {
-			req, err := CreateRequestFromJSON(item.Request)
+			req, err := CreateRequestFromJSON(item.Name, item.Request)
 			if err != nil {
 				return fmt.Errorf(constants.ErrInvalidRequestAt, item.ID, err)
 			}
@@ -132,8 +119,8 @@ func (c *Collection) validateItems(items []Item) error {
 				return fmt.Errorf(constants.ErrInvalidRequestAt, item.ID, err)
 			}
 		}
-		if item.Folder != nil {
-			if err := c.validateItems(item.Folder.Items); err != nil {
+		if len(item.Item) > 0 {
+			if err := c.validateItems(item.Item); err != nil {
 				return err
 			}
 		}
@@ -158,9 +145,9 @@ func (c *Collection) AddRequest(request domain.Request, folderPath ...string) er
 	}
 
 	if len(folderPath) == 0 {
-		c.Items = append(c.Items, newItem)
+		c.Item = append(c.Item, newItem)
 	} else {
-		if err := c.addItemToFolder(newItem, c.Items, folderPath); err != nil {
+		if err := c.addItemToFolder(newItem, &c.Item, folderPath); err != nil {
 			return err
 		}
 	}
@@ -168,18 +155,18 @@ func (c *Collection) AddRequest(request domain.Request, folderPath ...string) er
 	return nil
 }
 
-func (c *Collection) addItemToFolder(item Item, items []Item, folderPath []string) error {
+func (c *Collection) addItemToFolder(item Item, items *[]Item, folderPath []string) error {
 	if len(folderPath) == 0 {
 		return errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidFolderPath, nil)
 	}
 
-	for i, existingItem := range items {
-		if existingItem.Folder != nil && existingItem.Folder.Name == folderPath[0] {
+	for i := range *items {
+		if (*items)[i].Name == folderPath[0] && len((*items)[i].Item) > 0 {
 			if len(folderPath) == 1 {
-				items[i].Folder.Items = append(items[i].Folder.Items, item)
+				(*items)[i].Item = append((*items)[i].Item, item)
 				return nil
 			}
-			return c.addItemToFolder(item, existingItem.Folder.Items, folderPath[1:])
+			return c.addItemToFolder(item, &(*items)[i].Item, folderPath[1:])
 		}
 	}
 
@@ -187,35 +174,27 @@ func (c *Collection) addItemToFolder(item Item, items []Item, folderPath []strin
 }
 
 func (c *Collection) RemoveRequest(requestID string) bool {
-	return c.removeRequestFromItems(requestID, c.Items)
+	return c.removeRequestFromItems(requestID, &c.Item)
 }
 
-func (c *Collection) removeRequestFromItems(requestID string, items []Item) bool {
-	for i, item := range items {
-		if item.Request != nil {
+func (c *Collection) removeRequestFromItems(requestID string, items *[]Item) bool {
+	for i := range *items {
+		if (*items)[i].Request != nil {
 			var req struct {
 				ID string `json:"id"`
 			}
-			if err := json.Unmarshal(item.Request, &req); err == nil && req.ID == requestID {
-				items = append(items[:i], items[i+1:]...)
+			if err := json.Unmarshal((*items)[i].Request, &req); err == nil && req.ID == requestID {
+				*items = append((*items)[:i], (*items)[i+1:]...)
 				return true
 			}
 		}
-		if item.Folder != nil {
-			if c.removeRequestFromItems(requestID, item.Folder.Items) {
+		if len((*items)[i].Item) > 0 {
+			if c.removeRequestFromItems(requestID, &(*items)[i].Item) {
 				return true
 			}
 		}
 	}
 	return false
-}
-
-func (i *Item) GetRequest() (domain.Request, error) {
-	if i.Request == nil {
-		return nil, nil
-	}
-
-	return CreateRequestFromJSON(i.Request)
 }
 
 func LoadCollection(path string, id string) (*Collection, error) {
@@ -226,4 +205,86 @@ func LoadCollection(path string, id string) (*Collection, error) {
 	var collection Collection
 	err = json.Unmarshal(data, &collection)
 	return &collection, err
+}
+
+func (c *Collection) AddFolder(folderName string, parentPath ...string) error {
+	newFolder := Item{
+		ID:   uuid.New().String(),
+		Name: folderName,
+		Item: []Item{},
+	}
+
+	if len(parentPath) == 0 {
+		c.Item = append(c.Item, newFolder)
+	} else {
+		if err := c.addItemToFolder(newFolder, &c.Item, parentPath); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Collection) DeleteFolder(folderPath []string) error {
+	if len(folderPath) == 0 {
+		return errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidFolderPath, nil)
+	}
+
+	return c.deleteFolderFromItems(&c.Item, folderPath)
+}
+
+func (c *Collection) deleteFolderFromItems(items *[]Item, folderPath []string) error {
+	for i := range *items {
+		if (*items)[i].Name == folderPath[0] {
+			if len(folderPath) == 1 {
+				*items = append((*items)[:i], (*items)[i+1:]...)
+				return nil
+			}
+			return c.deleteFolderFromItems(&(*items)[i].Item, folderPath[1:])
+		}
+	}
+	return errors.NewAppError(http.StatusNotFound, constants.ErrFolderNotFound, nil)
+}
+
+func (c *Collection) ToExportable() *Collection {
+	exportable := &Collection{
+		Info: c.Info,
+		Item: make([]Item, len(c.Item)),
+	}
+
+	for i, item := range c.Item {
+		exportable.Item[i] = item.toExportableItem()
+	}
+
+	return exportable
+}
+
+func (i Item) toExportableItem() Item {
+	exportable := Item{
+		Name:    i.Name,
+		Request: i.Request,
+	}
+
+	if i.Request != nil {
+		var requestMap map[string]interface{}
+		err := json.Unmarshal(i.Request, &requestMap)
+		if err == nil {
+			delete(requestMap, "id")
+			exportable.Request, err = json.Marshal(requestMap)
+			if err != nil {
+				exportable.Request = i.Request
+			}
+		} else {
+			exportable.Request = i.Request
+		}
+	}
+
+	if len(i.Item) > 0 {
+		exportable.Item = make([]Item, len(i.Item))
+		for j, subItem := range i.Item {
+			exportable.Item[j] = subItem.toExportableItem()
+		}
+	}
+
+	return exportable
 }

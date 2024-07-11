@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/FedeBP/pumoide/backend/internal/domain"
@@ -35,24 +36,24 @@ func CreateRequest(data map[string]interface{}) (domain.Request, error) {
 	return req, nil
 }
 
-func CreateRequestFromJSON(data []byte) (domain.Request, error) {
+func CreateRequestFromJSON(name string, data json.RawMessage) (domain.Request, error) {
 	var baseRequest struct {
-		Type string `json:"type"`
+		Url     string      `json:"url"`
+		Method  string      `json:"method"`
+		GraphQL interface{} `json:"graphql"`
 	}
 	if err := json.Unmarshal(data, &baseRequest); err != nil {
 		return nil, err
 	}
 
 	var request domain.Request
-	switch domain.RequestType(baseRequest.Type) {
-	case domain.RequestTypeREST:
-		request = &RESTRequest{}
-	case domain.RequestTypeWebSocket:
-		request = &WebSocketRequest{}
-	case domain.RequestTypeGraphQL:
-		request = &GraphQLRequest{}
-	default:
-		return nil, fmt.Errorf("unknown request type: %s", baseRequest.Type)
+
+	if baseRequest.GraphQL != nil {
+		request = &GraphQLRequest{Name: name}
+	} else if strings.HasPrefix(strings.ToLower(baseRequest.Url), "ws://") || strings.HasPrefix(strings.ToLower(baseRequest.Url), "wss://") {
+		request = &WebSocketRequest{Name: name}
+	} else {
+		request = &RESTRequest{Name: name}
 	}
 
 	if err := json.Unmarshal(data, request); err != nil {
@@ -88,7 +89,7 @@ func createRESTRequest(data map[string]interface{}) (*RESTRequest, error) {
 	req.URL = url
 
 	if body, ok := data["body"].(string); ok {
-		req.Body = body
+		req.Body = json.RawMessage(body)
 	}
 
 	if auth, ok := data["auth"].(map[string]interface{}); ok {

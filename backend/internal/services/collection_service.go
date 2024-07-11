@@ -51,9 +51,7 @@ func (s *CollectionService) CreateCollection(collectionData []byte) (*models.Col
 		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrFailedToReadCollection, err)
 	}
 
-	if collection.ID == constants.EmptyString {
-		collection.ID = uuid.New().String()
-	}
+	collection.ID = uuid.New().String()
 
 	if err := collection.Save(s.DefaultPath); err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
@@ -68,20 +66,13 @@ func (s *CollectionService) UpdateCollection(id string, collectionData []byte) (
 		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrFailedToReadCollection, err)
 	}
 
-	existingCollection, err := models.LoadCollection(s.DefaultPath, id)
-	if err != nil {
-		return nil, errors.NewAppError(http.StatusNotFound, constants.ErrFailedToLoadCollection, err)
-	}
+	updatedCollection.ID = id
 
-	existingCollection.Name = updatedCollection.Name
-	existingCollection.Description = updatedCollection.Description
-	existingCollection.Items = updatedCollection.Items
-
-	if err := existingCollection.Save(s.DefaultPath); err != nil {
+	if err := updatedCollection.Save(s.DefaultPath); err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
 	}
 
-	return existingCollection, nil
+	return &updatedCollection, nil
 }
 
 func (s *CollectionService) DeleteCollection(id string) error {
@@ -106,36 +97,21 @@ func (s *CollectionService) AddRequestToCollection(collectionID string, requestD
 
 	var requestInfo struct {
 		FolderPath []string        `json:"folderPath"`
+		Name       string          `json:"name"`
 		Request    json.RawMessage `json:"request"`
 	}
 	if err := json.Unmarshal(requestData, &requestInfo); err != nil {
 		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequestBody, err)
 	}
 
-	newRequest, err := models.CreateRequestFromJSON(requestInfo.Request)
+	newRequest, err := models.CreateRequestFromJSON(requestInfo.Name, requestInfo.Request)
 	if err != nil {
 		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidRequest, err)
 	}
 
-	targetItems := &collection.Items
-	for _, folderName := range requestInfo.FolderPath {
-		found := false
-		for i, item := range *targetItems {
-			if item.Folder != nil && item.Name == folderName {
-				targetItems = &(*targetItems)[i].Folder.Items
-				found = true
-				break
-			}
-		}
-		if !found {
-			return nil, errors.NewAppError(http.StatusNotFound, constants.ErrFolderNotFound, nil)
-		}
+	if err := s.addRequestToFolder(&collection.Item, requestInfo.FolderPath, newRequest); err != nil {
+		return nil, err
 	}
-
-	*targetItems = append(*targetItems, models.Item{
-		Name:    newRequest.GetName(),
-		Request: requestInfo.Request,
-	})
 
 	if err := collection.Save(s.DefaultPath); err != nil {
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
@@ -144,36 +120,51 @@ func (s *CollectionService) AddRequestToCollection(collectionID string, requestD
 	return newRequest, nil
 }
 
+func (s *CollectionService) addRequestToFolder(items *[]models.Item, folderPath []string, request domain.Request) error {
+	if len(folderPath) == 0 {
+		requestJSON, err := json.Marshal(request)
+		if err != nil {
+			return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToEncodeRequest, err)
+		}
+		*items = append(*items, models.Item{
+			ID:      uuid.New().String(),
+			Name:    request.GetName(),
+			Request: requestJSON,
+		})
+		return nil
+	}
+
+	for i := range *items {
+		if (*items)[i].Name == folderPath[0] {
+			if len(folderPath) == 1 {
+				if (*items)[i].Item == nil {
+					(*items)[i].Item = []models.Item{}
+				}
+				requestJSON, err := json.Marshal(request)
+				if err != nil {
+					return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToEncodeRequest, err)
+				}
+				(*items)[i].Item = append((*items)[i].Item, models.Item{
+					ID:      uuid.New().String(),
+					Name:    request.GetName(),
+					Request: requestJSON,
+				})
+				return nil
+			}
+			return s.addRequestToFolder(&(*items)[i].Item, folderPath[1:], request)
+		}
+	}
+
+	return errors.NewAppError(http.StatusNotFound, constants.ErrFolderNotFound, nil)
+}
+
 func (s *CollectionService) DeleteRequestFromCollection(collectionID string, requestID string) error {
 	collection, err := models.LoadCollection(s.DefaultPath, collectionID)
 	if err != nil {
 		return errors.NewAppError(http.StatusNotFound, constants.ErrFailedToLoadCollection, err)
 	}
 
-	deleted := false
-	var removeRequestFromItems func(*[]models.Item) bool
-	removeRequestFromItems = func(items *[]models.Item) bool {
-		for i, item := range *items {
-			if item.Request != nil {
-				var req struct {
-					ID string `json:"id"`
-				}
-				if err := json.Unmarshal(item.Request, &req); err == nil && req.ID == requestID {
-					*items = append((*items)[:i], (*items)[i+1:]...)
-					return true
-				}
-			}
-			if item.Folder != nil {
-				if removeRequestFromItems(&item.Folder.Items) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-
-	deleted = removeRequestFromItems(&collection.Items)
-
+	deleted := s.deleteRequestFromItems(&collection.Item, requestID)
 	if !deleted {
 		return errors.NewAppError(http.StatusNotFound, constants.ErrRequestNotFound, nil)
 	}
@@ -185,36 +176,74 @@ func (s *CollectionService) DeleteRequestFromCollection(collectionID string, req
 	return nil
 }
 
-func (s *CollectionService) ExportCollection(collectionID string) (*models.ExportedCollection, error) {
+func (s *CollectionService) deleteRequestFromItems(items *[]models.Item, requestID string) bool {
+	for i := range *items {
+		if (*items)[i].Request != nil {
+			var req struct {
+				ID string `json:"id"`
+			}
+			if err := json.Unmarshal((*items)[i].Request, &req); err == nil && req.ID == requestID {
+				*items = append((*items)[:i], (*items)[i+1:]...)
+				return true
+			}
+		}
+		if len((*items)[i].Item) > 0 {
+			if s.deleteRequestFromItems(&(*items)[i].Item, requestID) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *CollectionService) ExportCollection(collectionID string) (*models.Collection, error) {
 	collection, err := models.LoadCollection(s.DefaultPath, collectionID)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.NewAppError(http.StatusNoContent, constants.ErrFailedToLoadCollection, err)
+			return nil, errors.NewAppError(http.StatusNoContent, constants.ErrCollectionNotFound, err)
 		}
 		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToLoadCollection, err)
 	}
 
-	exportedCollection := collection.ToExportedCollection()
+	exportableCollection := collection.ToExportable()
 
-	return &exportedCollection, nil
+	if exportableCollection == nil {
+		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToExportCollection, nil)
+	}
+
+	return exportableCollection, nil
 }
 
-func (s *CollectionService) ImportCollection(importedCollectionData []byte) (*models.Collection, error) {
-	var importedCollection models.ImportedCollection
-	if err := json.Unmarshal(importedCollectionData, &importedCollection); err != nil {
-		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrFailedToReadCollection, err)
-	}
-
-	newCollection, err := models.NewCollectionFromImported(importedCollection)
+func (s *CollectionService) AddFolderToCollection(collectionID string, folderName string, parentPath []string) error {
+	collection, err := models.LoadCollection(s.DefaultPath, collectionID)
 	if err != nil {
-		return nil, errors.NewAppError(http.StatusBadRequest, constants.ErrInvalidCollection, err)
+		return errors.NewAppError(http.StatusNotFound, constants.ErrFailedToLoadCollection, err)
 	}
 
-	newCollection.ID = uuid.New().String()
-
-	if err := newCollection.Save(s.DefaultPath); err != nil {
-		return nil, errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
+	if err := collection.AddFolder(folderName, parentPath...); err != nil {
+		return err
 	}
 
-	return newCollection, nil
+	if err := collection.Save(s.DefaultPath); err != nil {
+		return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
+	}
+
+	return nil
+}
+
+func (s *CollectionService) DeleteFolderFromCollection(collectionID string, folderPath []string) error {
+	collection, err := models.LoadCollection(s.DefaultPath, collectionID)
+	if err != nil {
+		return errors.NewAppError(http.StatusNotFound, constants.ErrFailedToLoadCollection, err)
+	}
+
+	if err := collection.DeleteFolder(folderPath); err != nil {
+		return err
+	}
+
+	if err := collection.Save(s.DefaultPath); err != nil {
+		return errors.NewAppError(http.StatusInternalServerError, constants.ErrFailedToSaveCollection, err)
+	}
+
+	return nil
 }

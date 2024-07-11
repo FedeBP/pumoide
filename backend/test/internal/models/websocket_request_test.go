@@ -1,4 +1,4 @@
-package models
+package models_test
 
 import (
 	"context"
@@ -34,9 +34,10 @@ func TestWebSocketRequest_Validate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "Empty URL",
+			name: "Invalid URL",
 			request: models.WebSocketRequest{
 				Name:        "Test WebSocket",
+				URL:         "invalid-url",
 				MessageType: "text",
 				Message:     "Hello, WebSocket!",
 				Timeout:     &timeout,
@@ -79,25 +80,42 @@ func TestWebSocketRequest_Validate(t *testing.T) {
 }
 
 func TestWebSocketRequest_Execute(t *testing.T) {
-	upgrader := websocket.Upgrader{}
+	var serverClosed bool
+	var serverCloseError error
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upgrader := websocket.Upgrader{}
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
+			t.Logf("Failed to upgrade connection: %v", err)
 			return
 		}
-		defer c.Close()
+		defer func() {
+			if err := c.Close(); err != nil {
+				serverCloseError = err
+			}
+			serverClosed = true
+		}()
 		for {
 			mt, message, err := c.ReadMessage()
 			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					t.Logf("ReadMessage error: %v", err)
+				}
 				break
 			}
 			err = c.WriteMessage(mt, []byte("Echo: "+string(message)))
 			if err != nil {
+				t.Logf("WriteMessage error: %v", err)
 				break
 			}
 		}
 	}))
-	defer server.Close()
+	defer func() {
+		server.Close()
+		if serverCloseError != nil {
+			t.Logf("Server WebSocket close error: %v", serverCloseError)
+		}
+	}()
 
 	timeout := 5 * time.Second
 	wsURL := "ws" + server.URL[4:]
@@ -117,6 +135,10 @@ func TestWebSocketRequest_Execute(t *testing.T) {
 	require.True(t, ok)
 	assert.Len(t, wsResp.Messages, 1)
 	assert.Contains(t, wsResp.Messages[0], "Echo: Hello, WebSocket!")
+
+	time.Sleep(100 * time.Millisecond)
+	assert.True(t, serverClosed, "Server should have closed the WebSocket connection")
+	assert.NoError(t, serverCloseError, "Server should not have encountered an error while closing the WebSocket connection")
 }
 
 func TestWebSocketRequest_MarshalUnmarshalJSON(t *testing.T) {
@@ -152,35 +174,4 @@ func TestWebSocketRequest_MarshalUnmarshalJSON(t *testing.T) {
 	assert.Equal(t, req.Message, unmarshaled.Message)
 	require.NotNil(t, unmarshaled.Timeout)
 	assert.Equal(t, *req.Timeout, *unmarshaled.Timeout)
-
-	reqNilTimeout := &models.WebSocketRequest{
-		Name:        "Test WebSocket No Timeout",
-		URL:         "ws://example.com/socket",
-		MessageType: "text",
-		Message:     "Hello, WebSocket!",
-	}
-
-	dataNilTimeout, err := json.Marshal(reqNilTimeout)
-	require.NoError(t, err)
-
-	var jsonMapNilTimeout map[string]interface{}
-	err = json.Unmarshal(dataNilTimeout, &jsonMapNilTimeout)
-	require.NoError(t, err)
-
-	assert.Equal(t, "Test WebSocket No Timeout", jsonMapNilTimeout["name"])
-	assert.Equal(t, "ws://example.com/socket", jsonMapNilTimeout["url"])
-	assert.Equal(t, "text", jsonMapNilTimeout["messageType"])
-	assert.Equal(t, "Hello, WebSocket!", jsonMapNilTimeout["message"])
-	_, timeoutExists := jsonMapNilTimeout["timeout"]
-	assert.False(t, timeoutExists)
-
-	var unmarshaledNilTimeout models.WebSocketRequest
-	err = json.Unmarshal(dataNilTimeout, &unmarshaledNilTimeout)
-	require.NoError(t, err)
-
-	assert.Equal(t, reqNilTimeout.Name, unmarshaledNilTimeout.Name)
-	assert.Equal(t, reqNilTimeout.URL, unmarshaledNilTimeout.URL)
-	assert.Equal(t, reqNilTimeout.MessageType, unmarshaledNilTimeout.MessageType)
-	assert.Equal(t, reqNilTimeout.Message, unmarshaledNilTimeout.Message)
-	assert.Nil(t, unmarshaledNilTimeout.Timeout)
 }

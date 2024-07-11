@@ -19,15 +19,23 @@ import (
 )
 
 type GraphQLRequest struct {
-	ID                 string                     `json:"id,omitempty"`
-	Name               string                     `json:"name,omitempty"`
+	ID      string          `json:"id,omitempty"`
+	Name    string          `json:"name,omitempty"`
+	URL     string          `json:"url"`
+	Method  string          `json:"method"`
+	Headers []domain.Header `json:"header,omitempty"`
+	Body    struct {
+		Mode    string `json:"mode"`
+		GraphQL struct {
+			Query     string                 `json:"query"`
+			Variables map[string]interface{} `json:"variables,omitempty"`
+		} `json:"graphql"`
+	} `json:"body"`
 	Type               domain.RequestType         `json:"type"`
-	URL                string                     `json:"url"`
 	Query              string                     `json:"query"`
 	Variables          map[string]interface{}     `json:"variables,omitempty"`
 	OperationName      string                     `json:"operationName,omitempty"`
 	Auth               *domain.Auth               `json:"auth,omitempty"`
-	Headers            []domain.Header            `json:"headers,omitempty"`
 	DependsOn          []string                   `json:"dependsOn,omitempty"`
 	ExtractVariables   map[string]string          `json:"extractVariables,omitempty"`
 	Timeout            *time.Duration             `json:"-"`
@@ -112,10 +120,6 @@ func (r *GraphQLRequest) applyAuthentication(req *http.Request, env *domain.Envi
 }
 
 func (r *GraphQLRequest) Validate() error {
-	if r.Name == constants.EmptyString {
-		return errors.NewAppError(http.StatusBadRequest, constants.ErrEmptyRequestName, nil)
-	}
-
 	if err := validateURL(r.URL); err != nil {
 		return err
 	}

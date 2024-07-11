@@ -18,10 +18,10 @@ import (
 type WebSocketRequest struct {
 	ID                 string                     `json:"id,omitempty"`
 	Name               string                     `json:"name,omitempty"`
-	Type               domain.RequestType         `json:"type"`
 	URL                string                     `json:"url"`
+	Headers            []domain.Header            `json:"header,omitempty"`
+	Type               domain.RequestType         `json:"type"`
 	Auth               *domain.Auth               `json:"auth,omitempty"`
-	Headers            []domain.Header            `json:"headers,omitempty"`
 	QueryParams        map[string]string          `json:"queryParams,omitempty"`
 	DependsOn          []string                   `json:"dependsOn,omitempty"`
 	ExtractVariables   map[string]string          `json:"extractVariables,omitempty"`
